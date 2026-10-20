@@ -18,7 +18,7 @@ core（下单意图 + 风控裁决已完成）
         ├── MockTrader  ──► 内存/文件（开发、回放）
         └── XTPTrader   ──► 柜台 ──► 成交回报
         ↓
-  成交/持仓快照 ──► 实盘运行域（run / exec，待定）
+  成交/持仓快照 ──► core 的 quant（实盘运行域）
         └── QueryFills ──► 对账（risk 持有留痕）
 ```
 

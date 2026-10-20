@@ -8,19 +8,23 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 
 > **所有权声明**：本仓**当前不持有任何业务表**：它是通道适配器，只透传柜台状态。
 
-订单 / 成交 / 持仓快照归**实盘运行域**（`run` 或独立 `exec` schema，**待定**，倾向 `run`）；对账留痕归 `tellurion-risk`；通道配置加密存储，**不入库明文**。
+订单 / 成交 / 持仓快照归 **core 的 `quant` schema**（`quant.orders` / `fills` / `positions` / `portfolio_snapshot`——**实盘运行域就是 core 进程**）；对账留痕归 `tellurion-risk`；通道配置加密存储，**不入库明文**。
 > 上级依据：`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §1 —— **DDL 只有一个 owner**，同一个 PG 实例、每服务一个 schema，将来拆库是"按 schema 搬走"而不是重写。
 > 本文件是本仓表结构的**唯一真相源**：代码里的建表语句与它不一致时，**改代码**；要改表结构，先改本文件（结构级变更还要立 ADR）。
 
 ## 1. 归属表
 
-> **无业务表**（当前）。
+**无业务表**（当前）。
+
+> ⚠️ **纠正（2026-10-20 审查）**：本文早期版本写「订单/成交/持仓归实盘运行域（`run` 或 `exec`，待定，倾向 `run`）」——**这是错的**。
+> `run` 是 `tellurion-orchestration` 的**任务域**（job / batch / walkforward / artifact / worker / `strategy_state` 检查点），
+> 把订单放进去等于让"只派活不裁决"的服务拥有交易真相。订单的真相一直在 **core 的 `quant`**。
 >
-> 如果将来需要独立的 `exec` schema（订单/成交/持仓的本地镜像），必须**先立 ADR**：那意味着实盘运行域的数据归属要从 `run` 拆出来，属于结构级变更。
+> 只有一种情况会变：将来要建**独立 `exec` schema** 做柜台状态的本地镜像 —— 那必须**先立 ADR**（数据归属变更属结构级），再改本文 §1，最后写迁移。
 
 | 数据 | 归属 | 说明 |
 |---|---|---|
-| 订单 / 成交 / 持仓快照 | 实盘运行域（`run` 或 `exec`，待定） | 网关**只透传**，不做本地真相 |
+| 订单 / 成交 / 持仓快照 | **core `quant`**（实盘运行域） | 网关**只透传**，不做本地真相；将来建 `exec` 镜像须先立 ADR |
 | 通道配置（账户、连接参数） | 网关自有配置，**加密存储** | 密钥走环境 / 密钥管理，**禁止明文进库** |
 | 对账留痕 | `tellurion-risk`（`risk` schema） | 网关只提供 `QueryFills` 数据 |
 

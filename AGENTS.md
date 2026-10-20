@@ -8,6 +8,8 @@
 
 **状态**：预留（S0 占位，触发式启动）——尚未启动，无实现
 
+**今天的实现**：`core:pkg/live`（`MockTrader` / order store / paper trading）+ `core:pkg/live/broker/xtp`（XTP 骨架）。本仓只搬**通道适配**，运行域留 core。
+
 ## 2. 构建 / 测试（必须单仓可跑）
 
 ```bash

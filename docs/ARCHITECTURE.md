@@ -21,7 +21,7 @@ core（订单意图）
   ├── MockTrader  → 内存 / 文件
   └── XTPTrader   → 券商柜台（最小单位/委托类型/限流在适配器内）
       ↓
-成交回报 / 持仓 ──► 实盘运行域（run / exec，待定）
+成交回报 / 持仓 ──► core 的 quant（实盘运行域；将来建 exec 镜像须先立 ADR）
       └── QueryFills ──► 对账（risk 留痕）
 ```
 
