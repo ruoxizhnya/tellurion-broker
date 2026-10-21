@@ -8,7 +8,7 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 
 > **所有权声明**：本仓**当前不持有任何业务表**：它是通道适配器，只透传柜台状态。
 
-订单 / 成交 / 持仓快照归 **core 的 `quant` schema**（`quant.orders` / `fills` / `positions` / `portfolio_snapshot`——**实盘运行域就是 core 进程**）；对账留痕归 `tellurion-risk`；通道配置加密存储，**不入库明文**。
+订单 / 成交 / 持仓快照是**目标表·未建**（`quant.orders` / `fills` / `positions` / `portfolio_snapshot`——`tellurion:docs/SPEC.md` 模块化内核目标形态明标「尚未实施」，内联 DDL 亦无此表），**最终归属待裁**（U2，见 §5）——现状登记为 **core 的 `quant`**（**实盘运行域就是 core 进程**）；对账留痕归 `tellurion-risk`；通道配置加密存储，**不入库明文**。
 > 上级依据：`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §1 —— **DDL 只有一个 owner**，同一个 PG 实例、每服务一个 schema，将来拆库是"按 schema 搬走"而不是重写。
 > 本文件是本仓表结构的**唯一真相源**：代码里的建表语句与它不一致时，**改代码**；要改表结构，先改本文件（结构级变更还要立 ADR）。
 
@@ -18,13 +18,13 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 
 > ⚠️ **纠正（2026-10-20 审查）**：本文早期版本写「订单/成交/持仓归实盘运行域（`run` 或 `exec`，待定，倾向 `run`）」——**这是错的**。
 > `run` 是 `tellurion-orchestration` 的**任务域**（job / batch / walkforward / artifact / worker / `strategy_state` 检查点），
-> 把订单放进去等于让"只派活不裁决"的服务拥有交易真相。订单的真相一直在 **core 的 `quant`**。
+> 把订单放进去等于让"只派活不裁决"的服务拥有交易真相。订单的真相落在 **core 的 `quant`**（**目标表·未建**，最终归属待裁 U2——见 §5）。
 >
 > 只有一种情况会变：将来要建**独立 `exec` schema** 做柜台状态的本地镜像 —— 那必须**先立 ADR**（数据归属变更属结构级），再改本文 §1，最后写迁移。
 
 | 数据 | 归属 | 说明 |
 |---|---|---|
-| 订单 / 成交 / 持仓快照 | **core `quant`**（实盘运行域） | 网关**只透传**，不做本地真相；将来建 `exec` 镜像须先立 ADR |
+| 订单 / 成交 / 持仓快照 | **目标表·未建**；最终归属待裁（U2，见 §5）——现状登记 **core `quant`**（实盘运行域） | 网关**只透传**，不做本地真相；将来建 `exec` 镜像须先立 ADR |
 | 通道配置（账户、连接参数） | 网关自有配置，**加密存储** | 密钥走环境 / 密钥管理，**禁止明文进库** |
 | 对账留痕 | `tellurion-risk`（`risk` schema） | 网关只提供 `QueryFills` 数据 |
 
@@ -48,12 +48,12 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 
 ## 4. 数据治理（本仓无业务表）
 
-- 本仓**不建表**：订单 / 成交 / 持仓真相归实盘运行域（`run` 或独立 `exec`，待裁）；对账留痕归 `risk`。
+- 本仓**不建表**：订单 / 成交 / 持仓是**目标表·未建**，最终归属待裁（U2，见 §5；`run` 选项已排除，现状登记 core `quant`）；对账留痕归 `risk`。
 - 通道配置（账户、连接参数、证书）**加密存储**，密钥走环境 / 密钥管理：**代码与库里都不许出现明文**（安全红线，高于任何便利）。
 - 若将来要建 `exec` schema（柜台状态的本地镜像）：**先立 ADR → 再改本文件 §1 → 最后写迁移**。顺序不能反，这是数据归属变更，属结构级。
 - 本仓**不做**数据修复类迁移：柜台是真相源，本地镜像只能重建，不能"修"。
 
 ## 5. 待定
 
-- `run` vs 独立 `exec` schema 未裁决（见 design §5）；裁决前不建表。
+- 订单 / 成交 / 持仓快照的最终归属未裁决（U2，集中登记于 `tellurion:docs/design/qt-decoupling/repo-inventory.md` §3.1——单仓只留此指针）；裁决前不建表。
 - 对账口径（订单号 / 成交号 / 资金流水）未定。

@@ -46,7 +46,7 @@ go test ./...
 
 | 依赖 | 版本 | 说明 |
 |---|---|---|
-| `github.com/ruoxizhnya/tellurion-contracts` | 待定（S2 后 `v0.1.0`） | `BrokerPort` 契约 |
+| `github.com/ruoxizhnya/tellurion-contracts` | 待定（S2 后 `v0.1.0`） | `BrokerGateway` 契约 |
 | `github.com/ruoxizhnya/tellurion-kit` | 待定（S2 后 `v0.1.0`） | 日志 / HTTP |
 
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。

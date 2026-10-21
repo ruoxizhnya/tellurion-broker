@@ -45,7 +45,7 @@ core（订单意图）
 ## 5. 依赖方向
 
 ```
-contracts（BrokerPort / OrderRequest / Fill）+ kit（logging/http）
+contracts（BrokerGateway / OrderRequest / Fill）+ kit（logging/http）
         ↑
  tellurion-broker ◄──(进程内 port)── core
         └──► 券商柜台
