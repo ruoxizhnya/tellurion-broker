@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-21
-verified-by: 任务台账批量重分布（X 线单展开：QT-45 迁入）
+last-verified: 2026-10-22
+verified-by: M8 接口对表（QT-45 前置 ②）
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -20,6 +20,9 @@ verified-by: 任务台账批量重分布（X 线单展开：QT-45 迁入）
 ### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] ⬜
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
+>
+> **M8 前置完成（2026-10-22）**：接口对表见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9。开工前先读 §9.1 的八条前置事实——今天不是「一个 port 两实现」而是**两个 port、三个实现**（F1）、没有上游幂等键（F2）、没有可区分的错误分类（F3）、XTP 是 offline skeleton 且 `EmergencyFlatten` 伪造成功（F4）、申报规则归属混用且 Mock 不校验（F5）、对账真实输入是 `QuerySettlement` 快照而非 `QueryFills` 且生产自检恒零差异（F6）、DTO 全在 core 且混入执行层语义（F7）、XTP 装配前置无检查（F8）。本单**仍 ⬜**：对表是开工前置，不是实现；X6a 从「先定 `ClientOrderID` 幂等」开始，X6b 口径订正为快照，X6c 是从零实现而非接 SDK。
+> 对表自检（2026-10-22，基线 core `dbe4c68`）：core `path:line` 引用逐条命中；4 个目标 port / 9 个方法 / 12 个错误码与 `api-schema.md` 双向一致；破坏验证三腿（改错行号 / 删一个方法 / 删一个错误码）各自红，还原后绿。
 
 - **① 目标**：交易通道收敛为 port 两实现，归一化 DTO 进 contracts；通道级校验与风控校验分界清晰。
 - **② 上下文**：`broker-gateway-design.md`（D23）；`xtp.go:387` 通道校验与风控校验混用需拆。
@@ -31,7 +34,7 @@ verified-by: 任务台账批量重分布（X 线单展开：QT-45 迁入）
 
 ---
 
-> **⚠️ 开工前置（refactor-plan-review M5/M8，2026-10-20 登记）**：本表任何单开工前，必须先过 core `tellurion:docs/TASKS.md`「五、X 线」的**公共前置**两条：① 建仓/升格前先与 ADR-027 §2 对账（12 仓是上限/当前规划，不是承诺终态）；② 本仓设计文档先写「**接口对表**」小节（签名 + 错误语义 + 版本策略，模板见 `tellurion:docs/design/qt-decoupling/target-module-topology.md` UnifiedDataPoint 节），**未对表不开工**。正文以彼处为准，此处只留指针、不镜像。
+> **⚠️ 开工前置（refactor-plan-review M5/M8，2026-10-20 登记）**：本表任何单开工前，必须先过 core `tellurion:docs/TASKS.md`「五、X 线」的**公共前置**两条：① 建仓/升格前先与 ADR-027 §2 对账（12 仓是上限/当前规划，不是承诺终态）；② 本仓设计文档先写「**接口对表**」小节（签名 + 错误语义 + 版本策略，模板见 `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1），**未对表不开工**。正文以彼处为准，此处只留指针、不镜像。
 
 ## 施工序（候选单，开工前必须展开成六字段）
 
@@ -41,9 +44,9 @@ verified-by: 任务台账批量重分布（X 线单展开：QT-45 迁入）
 
 | 阶段 | 内容 | 上游单号 | 前置 |
 |---|---|---|---|
-| X6a | `BrokerGateway` port + `MockTrader`（幂等 / 超时语义跑通） | `QT-45` | 本仓立项 |
-| X6b | 对账口径定稿（订单号 / 成交号 / 资金流水） | `QT-45` | X6a |
-| X6c | `XTPTrader` 适配器（装配前置：对账 + 幂等 + 熔断） | `QT-45` | X6b |
+| X6a | `BrokerGateway` port + `MockTrader`（`ClientOrderID` 幂等 / 超时语义跑通） | `QT-45` | 本仓立项 + M8 对表 ✅ |
+| X6b | 对账口径定稿（**账户快照** `QuerySettlement` + 真实 broker 侧 + 差异注入验收） | `QT-45` | X6a |
+| X6c | `XTPTrader` 适配器（从零实现；装配前置：对账 + 幂等 + 熔断，缺一构造期拒绝） | `QT-45` | X6b |
 
 ## 二、跨仓指针（不在本仓，勿双写）
 
