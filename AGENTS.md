@@ -6,9 +6,11 @@
 
 交易通道网关：`XTPTrader` / `MockTrader` = 同一 port 的两个实现。**落地前必须先有对账方案**。
 
-**状态**：预留（S0 占位，触发式启动）——尚未启动，无实现
+**状态**：已启动（2026-10-23 施工 ①）——X6a 的四个 port + 内存 `Mock` 已落 `internal/gateway`；X6b/X6c/X6d 未做
 
-**今天的实现**：`core:pkg/live`（`MockTrader` / order store / paper trading）+ `core:pkg/live/broker/xtp`（XTP 骨架）。本仓只搬**通道适配**，运行域留 core。
+**今天的实现**（本仓，2026-10-23）：`internal/gateway` 的 `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` 四个 port、DTO、12 个契约哨兵、`Mock`（`ClientOrderID` 幂等 + 写前日志 + `unknown_state`）、`MemoryAckStore`。**未接 core、未接 PG、无 XTP**；细节见 `docs/ARCHITECTURE.md` §9.8。
+
+**迁出前的老实现**（core，待切读后退役）：`core:pkg/live`（`MockTrader` / order store / paper trading）+ `core:pkg/live/broker/xtp`（XTP 骨架）。本仓只搬**通道适配**，运行域留 core。
 
 ## 2. 构建 / 测试（必须单仓可跑）
 
@@ -48,6 +50,8 @@ go test ./...
 |---|---|---|
 | `github.com/ruoxizhnya/tellurion-contracts` | 待定（S2 后 `v0.1.0`） | `BrokerGateway` 契约 |
 | `github.com/ruoxizhnya/tellurion-kit` | 待定（S2 后 `v0.1.0`） | 日志 / HTTP |
+
+> 今日 `go.mod` **零 require**：`internal/gateway` 只用 stdlib，port / DTO 暂由本仓定义，`BrokerGateway` 随 X6a 定稿后落 contracts（R4）。上表两项在真正引入前不动 `go.mod`。
 
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。
 

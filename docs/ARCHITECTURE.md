@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: M8 接口对表（QT-45 前置 ②）
+last-verified: 2026-10-23
+verified-by: X6a 落地（port + Mock + 幂等）+ 文档同步
 ---
 
 # 架构 — tellurion-broker
@@ -66,7 +66,7 @@ contracts（BrokerGateway / OrderRequest / Fill）+ kit（logging/http）
 
 | 阶段 | 内容 | 前置 |
 |---|---|---|
-| X6a | port 定义 + MockTrader | 无 |
+| X6a | port 定义 + MockTrader 🔶（2026-10-23：port / DTO / 内存 Mock / `ClientOrderID` 幂等已落 `internal/gateway`；**未接 core**） | 无 |
 | X6b | 对账口径定稿 | risk 的 `QueryFills` 契约 |
 | X6c | XTPTrader | 对账 + 幂等 + 熔断三项就位 |
 | X6d | 独立进程（可选） | 多账户 / 多策略共用通道 |
@@ -214,3 +214,45 @@ type HealthChecker interface {
 | R6 | **XTP SDK / 许可 / 装配闸** | offline skeleton；`NewXTPTrader` 只校验配置；`EmergencyFlatten` 伪造成功 | X6c 从零实现；构造期强制注入 `SettlementQuerier` + 幂等映射 + `HealthChecker`，缺一返回 error；未实现能力返回 `not_supported`；**任何路径禁止 fake success** |
 | R7 | **kill-switch 的授权与审计** | `EmergencyFlatten` 绕过 T+1；XTP 侧无真实成交；谁有权触发未定 | 独立 `KillSwitch` port；调用方必须带运维身份与 reason；逐标的落审计（`bypassed_t1`）；与 QT-50 ④ 的鉴权矩阵合流 |
 | R8 | **密钥脱敏** | `Config.Password` `json:"-"` 但 `yaml:"password"`（`pkg/live/broker/xtp/xtp.go:119`） | 配置结构加 `String()`/日志脱敏；禁止把 `Config` 整体打进日志；密钥只从环境/密钥管理注入；加一条「日志里不出现 password」的测试 |
+
+### 9.8 实现现状（2026-10-23，施工 ①）
+
+**落地包**：`internal/gateway`（本仓唯一实现包，只用 stdlib，`go.mod` 零 require）。
+
+| 文件 | 内容 |
+|---|---|
+| `model.go` | `Side` / `OrderType` / `OrderStatus` 八值 + `Valid()` / `Terminal()`；`OrderRequest.Fingerprint()`；`OrderAck` / `CancelRequest` / `OrderState` / `Fill` / `Position` / `AccountSnapshot` / `EmergencyFlattenResult` |
+| `errors.go` | 12 个契约哨兵（与 `api-schema.md` §2 一一对应） |
+| `ports.go` | `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` / `AckStore`（+ `IdempotencyRecord`） |
+| `mock.go` | `Mock` 实现四个 port + `MemoryAckStore`（仅开发/测试用） |
+
+**能跑 vs 只是接口就位**
+
+| 能力 | 状态 |
+|---|---|
+| `PlaceOrder` 幂等（同载荷重放 → `IdempotentReplay=true` 不发送；异载荷 → `duplicate_order`） | ✅ 有测试 |
+| 写前日志顺序：`Load` → 占位 `Save` → 发送 → 回执 `Save` | ✅ 有测试 |
+| 映射不可用（store nil / Load 失败 / 占位失败）→ `idempotency_store_unavailable` 且**不发送** | ✅ 有测试 |
+| 断连 → `channel_down` 且**不发送** | ✅ 有测试 |
+| 回执落盘失败 → `unknown_state`，映射留占位（重放继续 unknown，不重发） | ✅ 有测试 |
+| 市价 + 有价格 + 资金够 → 全量成交；无价格 → 停在 `accepted`（不伪造成交） | ✅ 有测试 |
+| 柜台拒单 → `OrderAck{rejected}` 与 error **同时非 nil**（留痕） | ✅ 有测试 |
+| `CancelOrder`：已撤再撤 → 同终态 + nil；终态 → `order_not_cancelable` | ✅ 有测试 |
+| `QueryOrder`：本地无但映射有占位 → `OrderUnknown` + nil；映射也没有 → `order_not_found` | ✅ 有测试 |
+| `QueryPositions` / `QueryAccount` / `QueryFills` / `QuerySettlement`（内存快照） | ✅ 有测试 |
+| `EmergencyFlatten`：只报真实成交，未确认进 `Skipped`；重入不重卖 | ✅ 有测试 |
+| `HealthCheck` / `Connect` / `Disconnect` | ✅ 有测试 |
+| **持久**幂等映射（跨重启） | ❌ 只有 `MemoryAckStore`；PG 落点未接（R2） |
+| `XTPTrader` | ❌ 未做（X6c） |
+| 对账口径定稿 + 真实 broker 侧 | ❌ 未做（X6b / R3） |
+| core 消费方切换（旧 `LiveTrader` / `Broker` 退役） | ❌ 未做（R4） |
+
+**故意取舍（都写在代码注释里，改前先读）**
+
+1. `AckStore` **注入式**：`nil` 就是 fail-closed，**不**提供"忘了注入就自动用内存"的兜底。
+2. 回执落盘失败返回 `unknown_state` 而非"下单成功"——映射里留的是占位，任何重放都会被拦。
+3. Mock 在没有价格时不撮合，**不**用 0 或猜的价格伪造成交。
+4. `EmergencyFlatten` 的 `Sold` 必须对应真实提交并确认的订单，其余一律进 `Skipped`。
+5. `ClientOrderID` 由调用方生成，网关**不改写、不派生**；`EmergencyFlatten` 用 `flatten:<symbol>:<qty>` 保证重入不重卖。
+
+**自检结论**：X6a 的 port / DTO / 错误语义 / 幂等顺序**已定形可用**；本仓**未接 core、未接 PG、XTP 未动**——真钱通道仍被"对账 + 持久幂等 + 熔断"三道闸挡在 X6c 之外。

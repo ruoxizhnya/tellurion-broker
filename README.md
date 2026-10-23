@@ -1,6 +1,6 @@
 # tellurion-broker
 
-> module: `tellurion-broker` ｜ 状态：**预留（S0 占位，触发式启动）——尚未启动，无实现**
+> module: `tellurion-broker` ｜ 状态：**已启动（施工 ①）**——X6a 的四个 port + 内存 `Mock` 已落 `internal/gateway`；X6b（对账）、X6c（XTP）、X6d（独立进程）未做
 
 交易通道网关：`XTPTrader` / `MockTrader` = 同一 port 的两个实现。**落地前必须先有对账方案**。
 
@@ -8,9 +8,10 @@
 
 | 路径 | 内容 |
 |---|---|
+| `internal/gateway/` | `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` port + DTO + `Mock`（X6a） |
 | `docs/` | 本仓文档：台账 / 边界 / 决策 / 归档 —— 从这里进：`docs/README.md` |
 | `AGENTS.md` | 本仓入口（构建、边界、禁止、依赖版本） |
-| `doc.go` | 占位包（无实现） |
+| `doc.go` | 根包说明（实现按能力拆子包） |
 
 ## 快速开始
 

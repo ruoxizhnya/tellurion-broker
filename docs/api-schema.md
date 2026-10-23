@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: M8 接口对表（QT-45 前置 ②）
+last-verified: 2026-10-23
+verified-by: X6a 落地（port + Mock + 幂等）+ 文档同步
 ---
 
 # API Schema — tellurion-broker
@@ -10,7 +10,7 @@ verified-by: M8 接口对表（QT-45 前置 ②）
 > `BrokerGateway` 按"将来可远程"设计（DTO 序列化友好），但当前与实盘运行域同进程 —— 下单是延迟敏感路径，独立进程 = 每笔多一次网络跳。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
-> **今天 vs 目标**：今天 Go 里只有 `LiveTrader`（Mock / XTP）与 `Broker`（`SimulatedBroker`）两套旧面，目标 `BrokerGateway` **零实现**；八条实测事实见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.1（基线 core `dbe4c68`）。
+> **今天 vs 目标**：本仓 `internal/gateway` 已落本文四个 port + DTO + 12 哨兵 + 内存 `Mock`（X6a，2026-10-23），**未接 core、未接 PG**；core 侧仍有 `LiveTrader`（Mock / XTP）与 `Broker`（`SimulatedBroker`）两套旧面待退役（R4）。现状矩阵与取舍见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8，八条实测事实见 §9.1（基线 core `dbe4c68`）。
 > **port 的落点**：契约位是 **contracts**（`BrokerGateway` / 新 DTO 不随 S1 批量迁，随 X6a 定稿）；本仓是实现的物理归属，不是常驻服务（`tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2）。
 
 ## 1. 接口面（目标 port）
@@ -50,6 +50,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 
 | 实现 | port | 用途 | 现状 |
 |---|---|---|---|
+| `Mock`（`internal/gateway`） | `BrokerGateway` + `SettlementQuerier` + `KillSwitch` + `HealthChecker` | 本仓的新 MockTrader | **可用**（X6a）；注入式 `AckStore`，nil 即不发送；无价格不成交 |
 | `MockTrader` | `LiveTrader`（旧） | 开发 / 回放 / 压测 | 可用；**无编译期断言**，且不做板块申报规则校验 |
 | `XTPTrader` | `LiveTrader`（旧） | 真实柜台 | **offline skeleton**：`Connect`/`SubmitOrder`/`CancelOrder` 恒返回「SDK not linked」；`EmergencyFlatten` 伪造成功 |
 | `SimulatedBroker` | `Broker`（旧，另一套面） | `LiveEngine` 测试替身 | 生产零调用方（AUD-34）；去留见 §9.7 R4 |

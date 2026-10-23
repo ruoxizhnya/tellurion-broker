@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: M8 接口对表（QT-45 前置 ②）
+last-verified: 2026-10-23
+verified-by: X6a 落地（无表，DTO 在 internal/gateway）+ 文档同步
 ---
 
 # DB Schema — tellurion-broker
@@ -49,6 +49,7 @@ verified-by: M8 接口对表（QT-45 前置 ②）
 
 ## 4. 数据治理（本仓无业务表）
 
+- **现状（2026-10-23，X6a）**：`internal/gateway` 的 `Mock` 把订单 / 成交 / 持仓全放内存（`map` + `[]Fill`），**没有一条 DDL**，也没有 `database/sql` 依赖；`IdempotencyRecord` 只有内存实现 `MemoryAckStore`，生产必须换成持久 `AckStore`（R2 未裁）。
 - 本仓**不建表**：订单 / 成交 / 持仓是**目标表·未建**，最终归属待裁（U2，见 §5；`run` 选项已排除，现状登记 core `quant`）；对账留痕归 `risk`。
 - 幂等映射**不建在本仓 schema**：它要么由柜台原生保证，要么走注入 port（R2）；本仓不直连任何表。
 - 通道配置（账户、连接参数、证书）**加密存储**，密钥走环境 / 密钥管理：**代码与库里都不许出现明文**（安全红线，高于任何便利）。
