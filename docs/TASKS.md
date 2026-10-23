@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-23
-verified-by: R2 裁决 + 持久幂等映射落地 + 文档同步（QT-45 施工 ③）
+last-verified: 2026-10-24
+verified-by: R2 裁决 + 持久幂等映射落地 + R5 申报数量纯函数 + 文档同步（QT-45 施工 ④）
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -21,6 +21,13 @@ verified-by: R2 裁决 + 持久幂等映射落地 + 文档同步（QT-45 施工 
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
 >
+> **施工记录（2026-10-24，施工 ④）**：**R5 申报数量纯函数**落地，`go build/vet/test -count=1` 全绿（新增 `internal/gateway/lot`；用例覆盖 0 手 / 最小单位取整 / 超可用数量 / 涨跌停 / 越界价 / 非法入参）——
+> ① `Size(Input)`：目标权重 × 资金或可用数量 ÷ 价格，**向下取整**到申报单位（`LotSize`，0 = 100）；输出股数 / 手数与拒单原因码（`zero_quantity` / `insufficient_capital` / `exceeds_available_quantity` / `price_above_limit_up` / `price_below_limit_down` / `invalid_input`）。**不缩量、不抬量**：超可用 / 超资金 / 不足一手一律拒单，把定仓错误暴露在调用方；被拒结果不带数量（防止"顺手"把拒单当订单发出去）。
+> ② 涨跌停按**闭区间**：价格 ∈ [跌停, 涨停] 合法（涨停买入 / 跌停卖出是真实可申报委托，打板依赖它），越界才拒；单侧为 0 表示未提供、跳过该侧，两侧倒置判非法入参。
+> ③ `ValidateQuantity`：显式数量的申报单位校验；Mock 的 `PlaceOrder` 从内联 `quantity % lotSize` 改为调它，`gateway.DefaultLotSize` 收敛为 `lot.DefaultLotSize`。
+> ④ **破坏验证**：`floorToLot` 的 `math.Floor` 改 `math.Round` → `TestSizeBuyRoundsDownToLot` 红（300 股 / 3 手 vs 期望 200 / 2），逐字节还原后绿。
+> **仍未做（如实登记）**：XTP 全量适配器接入这份规则（归 X6c）、core `risk.ValidateOrderQuantity` 退役与 alias（跨仓腿，本仓不改 core）——「两个实现共用」在本仓只落了 Mock 这一半。
+>
 > **施工记录（2026-10-23，施工 ③）**：**R2 裁决落账 + 持久幂等映射落地**，`go build/vet/test` 全绿（gateway / ackstore / reconcile；PG 集成腿 6/6，DSN 在案）——
 > ① **R2 裁决**（[ADR 0002](adr/0002-幂等映射落-broker-写前日志.md)）：幂等映射落本仓 `broker.order_acks`（写前日志，**不是订单真相**）；柜台原生 `client-order-id` 只作第二道防线（重放不出当初 ack、比不了指纹，且仓内无 SDK 无法验证）；否掉 core order store（无表 / 无列 / U2 未裁，X6d 后也不成立）与本地文件 WAL。
 > ② **端口形状修正**：旧 `AckStore` 的 `Load` + `Save` 两步没有原子性——实测并发同 ID 两边都读到未命中会各发一笔（**16/16 复现**）。改为 `Load` / `Reserve`（原子占位）/ `SaveAck` / `Durable`；PG 用 `INSERT ... ON CONFLICT DO NOTHING RETURNING` 判定发送权，内存实现用同一临界区。
@@ -28,12 +35,12 @@ verified-by: R2 裁决 + 持久幂等映射落地 + 文档同步（QT-45 施工 
 > ④ **装配闸收紧**：`NewXTPTrader` 现在要求 `Acks.Durable()==true`——`MemoryAckStore` 接真钱在构造期被拒，「无幂等键不接真钱」不再靠装配方记得。
 > ⑤ **破坏验证**：拆开内存 `Reserve` 的临界区 → 并发腿 16 笔成交 / 32 winners（红）；逐字节还原 → 绿。PG 的 `ON CONFLICT DO NOTHING` 改成 `DO UPDATE` → 16 winners（红）；还原 → 6/6 绿。
 > ⑥ **X6d 裁决：暂缓**（2026-10-23）——仓内文档明写它是触发式选项（多账户共用通道 / 通道级高可用），当前单账户单实例，触发条件未到；本轮不建 `cmd/brokergateway`，文档口径不变。
-> **仍是 🔶**：X6c 全量适配器（下单 / 撤单 / 查单 / 回报 / 心跳 / 重连 / 限流）需要真实 XTP SDK 与柜台环境，仍从零未做；对账留痕进 risk（X3）未接；core 侧旧 `LiveTrader` / `Broker` 未退役（R4）；申报数量规则共用纯函数未抽（R5）；`broker.order_acks` 的保留期未定（当前不自动删）。
+> **仍是 🔶**：X6c 全量适配器（下单 / 撤单 / 查单 / 回报 / 心跳 / 重连 / 限流）需要真实 XTP SDK 与柜台环境，仍从零未做；对账留痕进 risk（X3）未接；core 侧旧 `LiveTrader` / `Broker` 未退役（R4）；`broker.order_acks` 的保留期未定（当前不自动删）。R5 已落（施工 ④，本仓腿）。
 >
 > **施工记录（2026-10-23，施工 ②）**：X6b 的**口径定稿**与 X6c 的**装配闸**已落，`go build/vet/test` 全绿（38 测试）——
 > ① **对账纯函数**（`internal/reconcile`，X6b）：输入两侧共用 `gateway.AccountSnapshot`（快照口径，F6；`QueryFills` 不参与对账判定），容差沿用 core 迁出时口径（现金 0.01 绝对 / 数量 0 / 市值 0.5% 相对且仅在数量相符时比 / 费用 0.01 / 快照时间漂移 60s），差异七类（现金 / 本地缺失 / 柜台缺失 / 数量 / 市值 / 费用 / 时间漂移）× 三级严重度，nil / 账户不符 / 重复标的 fail-loud，零差异返回空非 nil；**差异注入验收**（R3）=`TestReconcile_InjectedDriftFiresEachKind` 九条注入腿逐一命中，另有零差异 / 容差吞噪 / 纯函数确定性腿。**真实 broker 侧 `QuerySettlement` 仍 ❌**（归 X6c 全量）。
 > ② **XTPTrader fail-closed 骨架 + 装配闸**（`internal/gateway/xtp.go`，X6c 前半）：`NewXTPTrader` 构造期强制注入 `AckStore` / `SettlementQuerier` / `HealthChecker`，缺一返回 `ErrAssemblyIncomplete`（含缺哪个依赖的说明），坏配置同哨兵——**「无幂等键不接真钱」从文字变成可机械判定的护栏**（`TestNewXTPTrader_GateRejectsIncompleteAssembly` / `_GateRejectsBadConfig`）；已装配后**所有**方法（含 `EmergencyFlatten`）恒 `ErrChannelDown`，零 fake success（F4 反例不再重演），不接 SDK、不接网络；`XTPConfig` 无任何密钥字段（R8）。`ErrAssemblyIncomplete` 是**构造路径哨兵，不是第 13 个 wire code**（`api-schema.md` §2 十二码不变）。
-> **仍是 🔶**：X6c 全量适配器（下单 / 撤单 / 查单 / 回报 / 心跳 / 重连 / 限流，从零实现）未做；X6d（独立进程）施工 ③ 裁决暂缓；对账留痕进 risk（X3）未接；幂等映射持久落点（R2）施工 ③ 已裁为 `broker.order_acks`；core 侧旧 `LiveTrader` / `Broker` 未退役（R4）；申报数量规则共用纯函数未抽（R5）。
+> **仍是 🔶**：X6c 全量适配器（下单 / 撤单 / 查单 / 回报 / 心跳 / 重连 / 限流，从零实现）未做；X6d（独立进程）施工 ③ 裁决暂缓；对账留痕进 risk（X3）未接；幂等映射持久落点（R2）施工 ③ 已裁为 `broker.order_acks`；core 侧旧 `LiveTrader` / `Broker` 未退役（R4）。
 >
 > **施工记录（2026-10-23，施工 ①）**：X6a 已落 `internal/gateway`——四个 port（`BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker`）+ DTO + 12 哨兵 + 内存 `Mock`（`ClientOrderID` 幂等、写前日志、`unknown_state` 语义），接口契约与 `api-schema.md` 逐条对齐；现状矩阵与取舍见 `ARCHITECTURE.md` §9.8。
 > 自审补正（2026-10-23，施工 ①）——**三处都会产生错误结论的缺陷**：

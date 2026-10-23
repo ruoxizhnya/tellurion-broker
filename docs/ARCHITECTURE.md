@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-23
-verified-by: R2 裁决 + 持久幂等映射落地（ADR 0002）；X6d 按同日裁决暂缓
+last-verified: 2026-10-24
+verified-by: R2 裁决 + 持久幂等映射落地（ADR 0002）；R5 申报数量纯函数（施工 ④）；X6d 按同日裁决暂缓
 ---
 
 # 架构 — tellurion-broker
@@ -211,7 +211,7 @@ type HealthChecker interface {
 | R2 | **幂等映射的持久化** | ✅ **已裁（2026-10-23）**：落本仓 `broker.order_acks`（ADR 0002）；`AckStore` 改为 `Load` / `Reserve`（原子占位）/ `SaveAck` / `Durable`；柜台原生 `client-order-id` 只作第二道防线。否掉 core order store（无表 / 无列 / U2 未裁，X6d 后也不成立）与本地文件 WAL（单写者、真钱前仍要换 PG） | — |
 | R3 | **对账口径与真实 broker 侧** | 生产是 `traderAccountView` 自检（local=broker，差异恒零）；XTP 未实现 `BrokerQuerier`；`FeeSnap` 恒零 | X6b 定「快照口径」；X6c 必须提供真实 broker 侧 `QuerySettlement`；验收腿要有人为注入差异（`driftedBrokerView` 已有测试样板），不能只跑零差异 |
 | R4 | **port 归属与旧接口处置** | `BrokerGateway` 零实现；`LiveTrader`/`Broker` 两套旧面；`SimulatedBroker` 生产零调用方（AUD-34）；contracts 登记「`BrokerGateway` 未定形 / S1 不落」 | port + DTO 最终落 contracts（core 消费 + 本仓实现 = 两个使用方）；X6a 先让 Mock 同时满足旧 `LiveTrader`（core 内）与新 port（适配器薄层），再切消费方；`SimulatedBroker` 随 `LiveEngine` 一起退役或降为测试替身。「S1 不落」= 不随 QT-05 批量迁，不等于永远不落 |
-| R5 | **申报规则的所有权** | `risk.ValidateOrderQuantity`（`pkg/risk/lot.go:136`）是交易所规则，却住在 risk 包；XTP 调它，Mock 不调 | 移到通道侧纯函数（contracts 或 gateway 内部的 `lot` 包），**两个实现共用**；`RiskPolicy` 不再导出该规则；迁移期保留 alias 以避免 core 改动扩散 |
+| R5 | **申报规则的所有权** | `risk.ValidateOrderQuantity`（`pkg/risk/lot.go:136`）是交易所规则，却住在 risk 包；XTP 调它，Mock 不调 | ✅ **本仓腿已落（2026-10-24）**：规则抽为通道侧纯函数 `internal/gateway/lot`（`Size` 由目标权重/价格/资金/可用数量算申报数量，`ValidateQuantity` 校验显式数量；无 I/O / 时钟 / 全局状态），Mock 已改调同一份，`gateway.DefaultLotSize` 收敛为 `lot.DefaultLotSize`。**未做（跨仓 / 等 SDK）**：core 侧 `risk.ValidateOrderQuantity` 退役与 alias、XTP 全量适配器接入——归 X6c 跨仓腿 |
 | R6 | **XTP SDK / 许可 / 装配闸** | offline skeleton；`NewXTPTrader` 只校验配置；`EmergencyFlatten` 伪造成功 | X6c 从零实现；构造期强制注入 `SettlementQuerier` + 幂等映射 + `HealthChecker`，缺一返回 error；未实现能力返回 `not_supported`；**任何路径禁止 fake success** |
 | R7 | **kill-switch 的授权与审计** | `EmergencyFlatten` 绕过 T+1；XTP 侧无真实成交；谁有权触发未定 | 独立 `KillSwitch` port；调用方必须带运维身份与 reason；逐标的落审计（`bypassed_t1`）；与 QT-50 ④ 的鉴权矩阵合流 |
 | R8 | **密钥脱敏** | `Config.Password` `json:"-"` 但 `yaml:"password"`（`pkg/live/broker/xtp/xtp.go:119`） | 配置结构加 `String()`/日志脱敏；禁止把 `Config` 整体打进日志；密钥只从环境/密钥管理注入；加一条「日志里不出现 password」的测试 |
@@ -230,6 +230,7 @@ type HealthChecker interface {
 | `ackstore/ddl.go`（施工 ③） | `broker.order_acks` 的唯一 DDL（幂等、无版本表）+ `Migrate` 的语句源 |
 | `ackstore/pg.go`（施工 ③） | `AckStore` 的 PG 实现：原子 `Reserve`（`INSERT ... ON CONFLICT DO NOTHING RETURNING`）、`SaveAck`（只更新已占位行）、`Load`、`Durable=true`、`Migrate` |
 | `reconcile/reconcile.go`（施工 ②） | 快照口径对账纯函数：两侧共用 `AccountSnapshot`（F6），七类差异 × 三级严重度，容差沿用 core 迁出口径（现金 0.01 / 数量 0 / 市值 0.5% 仅数量相符时比 / 费用 0.01 / 时间漂移 60s），nil / 账户不符 / 重复标的 fail-loud，固定发射顺序，零差异返回空非 nil |
+| `lot/sizing.go`（施工 ④） | 申报数量纯函数（R5）：`Size`（目标权重 × 资金 / 持仓 ÷ 价格 → **向下取整**到申报单位；涨跌停带、超可用数量、超资金、0 手各自拒单）+ `ValidateQuantity`（显式数量的申报单位校验）；无 I/O、无时钟、无全局状态 |
 
 **能跑 vs 只是接口就位**
 
@@ -256,9 +257,9 @@ type HealthChecker interface {
 | `XTPTrader` **全方法 fail-closed**（已装配后恒 `channel_down`，零 fake success） | ✅ 有测试；SDK 真实实现 ❌（X6c 全量：下单/撤单/查单/回报/心跳/重连/限流） |
 | 对账纯函数（快照口径 + **差异注入验收**九腿） | ✅ 有测试（X6b 施工 ②）；真实 broker 侧 `QuerySettlement` ❌（归 X6c）；对账留痕进 risk 未接（X3） |
 | core 消费方切换（旧 `LiveTrader` / `Broker` 退役） | ❌ 未做（R4） |
-| 申报数量规则两实现共用同一份纯函数 | ❌ 未做（R5；Mock 内联了一份） |
+| 申报数量规则两实现共用同一份纯函数 | 🔶 纯函数 `internal/gateway/lot` 已落、**Mock 已改调**（施工 ④）；XTP 全量适配器接入归 X6c（SDK 未做） |
 
-**六条故意取舍（都写在代码注释里，改前先读）**
+**七条故意取舍（都写在代码注释里，改前先读）**
 
 1. `AckStore` **注入式**：`nil` 就是 fail-closed，**不**提供"忘了注入就自动用内存"的兜底。
 2. 回执落盘失败返回 `unknown_state` 而非"下单成功"——映射里留的是占位，任何重放都会被拦。
@@ -266,5 +267,6 @@ type HealthChecker interface {
 4. `EmergencyFlatten` 的 `Sold` 必须对应真实提交并确认的订单，其余一律进 `Skipped`；清仓单 ID 带**持仓代次**，重放来的单**不算**本次清仓的凭据。
 5. `ClientOrderID` 由调用方生成，网关**不改写、不派生**（`EmergencyFlatten` 是唯一例外：它内部自造 ID，用 `flatten:<symbol>:<代次>:<qty>` 区分轮次）。
 6. **发送权由 `Reserve` 一步判定**：不提供「`Load` 再 `Save`」的先查后写形状——那正是并发同 ID 重单的来源（实测可复现）。`SaveAck` 只能写已占位的行，没有占位就报错。
+7. **申报数量只向下取整，不向上补到最小单位**：目标不足一手 → 0 手 + `zero_quantity`，不悄悄抬成一手；卖出超可用 / 买入超资金也**拒单而不是缩量**——缩量与抬量都会把上游的定仓错误藏起来。涨跌停带按**闭区间**校验：涨停买入（打板）/ 跌停卖出是合法可申报委托，只有越界价才拒。
 
-**自检结论**：X6a 的 port / DTO / 错误语义 / 幂等顺序已定形可用；X6b 的口径已定稿为纯函数（差异注入验收在册）；X6c 的装配闸已把「无幂等键不接真钱」变成构造期可机械拒绝的护栏（并拒绝内存映射）；R2 已裁，持久幂等映射 `broker.order_acks` 已落。本仓仍**未接 core、无 XTP SDK 链路、未接真实柜台**——真钱通道现在只差 X6c 全量适配器（下单 / 撤单 / 查单 / 回报 / 心跳 / 重连 / 限流）。X6d 按 2026-10-23 裁决暂缓。
+**自检结论**：X6a 的 port / DTO / 错误语义 / 幂等顺序已定形可用；X6b 的口径已定稿为纯函数（差异注入验收在册）；X6c 的装配闸已把「无幂等键不接真钱」变成构造期可机械拒绝的护栏（并拒绝内存映射）；R2 已裁，持久幂等映射 `broker.order_acks` 已落；R5 的申报数量纯函数已落并由 Mock 共用（XTP 全量接入随 X6c）。本仓仍**未接 core、无 XTP SDK 链路、未接真实柜台**——真钱通道现在只差 X6c 全量适配器（下单 / 撤单 / 查单 / 回报 / 心跳 / 重连 / 限流）。X6d 按 2026-10-23 裁决暂缓。

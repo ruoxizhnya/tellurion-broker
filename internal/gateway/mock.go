@@ -6,10 +6,9 @@ import (
 	"sort"
 	"sync"
 	"time"
-)
 
-// DefaultLotSize 是默认申报数量单位（A 股 100 股整数倍）。
-const DefaultLotSize = 100
+	"tellurion-broker/internal/gateway/lot"
+)
 
 // MockOptions 是 Mock 通道的装配参数。
 type MockOptions struct {
@@ -25,7 +24,7 @@ type MockOptions struct {
 	// Prices 是市价撮合价（按 symbol）。没有价格时市价单只停留在 accepted，
 	// 不伪造成交。
 	Prices map[string]float64
-	// LotSize 是申报数量单位（默认 DefaultLotSize；0 表示不做该校验）。
+	// LotSize 是申报数量单位（0 用 lot.DefaultLotSize）。
 	LotSize int
 	// Reject 是故障注入：返回非空 code 表示柜台明确拒单（用于测试与回放）。
 	Reject func(req OrderRequest) (code, reason string)
@@ -85,7 +84,7 @@ func NewMock(opts MockOptions) *Mock {
 		m.prices = make(map[string]float64)
 	}
 	if m.lotSize == 0 {
-		m.lotSize = DefaultLotSize
+		m.lotSize = lot.DefaultLotSize
 	}
 	return m
 }
@@ -650,11 +649,8 @@ func (m *Mock) validate(req OrderRequest) error {
 	if !req.OrderType.Valid() {
 		return fmt.Errorf("%w: order_type %q", ErrInvalidOrder, req.OrderType)
 	}
-	if req.Quantity <= 0 {
-		return fmt.Errorf("%w: quantity must be positive", ErrInvalidOrder)
-	}
-	if m.lotSize > 1 && req.Quantity%m.lotSize != 0 {
-		return fmt.Errorf("%w: quantity must be a multiple of %d", ErrInvalidOrder, m.lotSize)
+	if sized := lot.ValidateQuantity(req.Quantity, m.lotSize); !sized.OK() {
+		return fmt.Errorf("%w: %s", ErrInvalidOrder, sized.Detail)
 	}
 	if req.OrderType == OrderLimit && req.LimitPrice <= 0 {
 		return fmt.Errorf("%w: limit_price is required for limit orders", ErrInvalidOrder)

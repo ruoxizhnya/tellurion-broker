@@ -50,7 +50,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 
 | 实现 | port | 用途 | 现状 |
 |---|---|---|---|
-| `Mock`（`internal/gateway`） | `BrokerGateway` + `SettlementQuerier` + `KillSwitch` + `HealthChecker` | 本仓的新 MockTrader | **可用**（X6a）；注入式 `AckStore`，nil 即不发送；无价格不成交 |
+| `Mock`（`internal/gateway`） | `BrokerGateway` + `SettlementQuerier` + `KillSwitch` + `HealthChecker` | 本仓的新 MockTrader | **可用**（X6a）；注入式 `AckStore`，nil 即不发送；无价格不成交；申报数量走 `internal/gateway/lot` 纯函数（R5） |
 | `XTPTrader`（`internal/gateway`，本仓） | 四个 port + `KillSwitch` | 真实柜台（X6c） | **fail-closed 骨架 + 装配闸**：构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一，或 `AckStore.Durable()==false` → `ErrAssemblyIncomplete`（构造路径哨兵，**不是第 13 个 wire code**）；已装配后所有方法恒 `channel_down`；SDK 从零实现未做 |
 | `PgStore`（`internal/ackstore`） | `AckStore`（装配 SPI，非四个 wire port） | 持久幂等映射（R2 已裁） | **可用**：`broker.order_acks`，原子 `Reserve`（`ON CONFLICT DO NOTHING`）+ 回执写回 + `Durable=true`；PG 集成测试按 `BROKER_TEST_DSN` 运行 |
 | `MemoryAckStore`（`internal/gateway`） | `AckStore` | 开发 / 测试 | 可用；**`Durable=false`**，进不了 XTP 装配闸 |
@@ -66,7 +66,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 | 最小单位、委托类型、柜台限流、**交易所申报数量规则**（100 股整数倍 / 科创板 200 股起等） | **网关内**（通道侧纯函数，两个实现共用） |
 | 数量上限、集中度、T+1、止损 | **RiskPolicy**（进程内裁决，规则源在 risk 服务） |
 
-> ⚠️ 现状与分界表不一致：申报数量规则今天住在 `risk.ValidateOrderQuantity`（core `pkg/risk/lot.go:136`），只有 XTP 调它（`pkg/live/broker/xtp/xtp.go:387`），Mock 不调。规则**归通道侧、代码位置迁走**见 §9.7 R5；无论迁到哪，**两个实现必须调用同一份**。网关**不 import 风控裁决**。
+> ✅ **本仓腿已落（2026-10-24，R5）**：申报数量规则抽为通道侧纯函数 `internal/gateway/lot`（无 I/O），Mock 已改调同一份；core 的 `risk.ValidateOrderQuantity` 尚未退役、XTP 全量适配器尚未接入（归 X6c 跨仓腿）。规则**归通道侧**，网关**不 import 风控裁决**。
 
 ## 2. 错误码与 fail-closed 语义
 
