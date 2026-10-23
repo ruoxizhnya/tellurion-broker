@@ -131,14 +131,14 @@ type HealthChecker interface {
 
 | 方法 | 今天 | 契约位 | 错误语义（本表冻结） | 版本策略 |
 |---|---|---|---|---|
-| `PlaceOrder` | `LiveTrader.SubmitOrder(ctx, symbol, direction, orderType, qty, price)`（`pkg/live/trader.go:42`）——**无 ClientOrderID**，Mock 立即成交（`pkg/live/mock_trader.go:207`） | contracts | `ClientOrderID` 必填；同 ID 同载荷 → 原 `OrderAck`（幂等重放）；同 ID 不同载荷 → `ErrDuplicateOrder`；柜台明确拒 → 非 nil `OrderAck{Status: rejected}` + `ErrOrderRejected`；发出后超时/断连 → `nil` + `ErrUnknownState`（**禁止重发**）；未连接 → `ErrChannelDown`（不发送）；规则不合法 → `ErrInvalidOrder`；买力不足 → `ErrInsufficientBuyingPower`；幂等映射不可用 → `ErrIdempotencyStoreUnavailable`（不发送） | 新 port = MINOR；签名/幂等语义改 = MAJOR |
+| `PlaceOrder` | `LiveTrader.SubmitOrder(ctx, symbol, direction, orderType, qty, price)`（`pkg/live/trader.go:42`）——**无 ClientOrderID**，Mock 立即成交（`pkg/live/mock_trader.go:207`） | contracts | `ClientOrderID` 必填；同 ID 同载荷 → 原 `OrderAck`（幂等重放，**并还原当初的错误**：被拒过的单重放仍返回 `ErrOrderRejected` / `ErrInsufficientBuyingPower`）；同 ID 不同载荷 → `ErrDuplicateOrder`；柜台明确拒 → 非 nil `OrderAck{Status: rejected}` + `ErrOrderRejected`；发出后超时/断连 → `nil` + `ErrUnknownState`（**禁止重发**）；未连接 → `ErrChannelDown`（不发送）；规则不合法 → `ErrInvalidOrder`；买力不足 → `ErrInsufficientBuyingPower`；幂等映射不可用 → `ErrIdempotencyStoreUnavailable`（不发送）。判重域 = `(本通道服务的账户, ClientOrderID)`——与本地订单索引同口径 | 新 port = MINOR；签名/幂等语义改 = MAJOR |
 | `CancelOrder` | `LiveTrader.CancelOrder(ctx, orderID)`；已成交/已撤再撤报错（`pkg/live/mock_trader.go:380`） | contracts | 已撤再撤 → 同终态 `OrderState` + `nil`（幂等）；已成交 → `ErrOrderNotCancelable`；未知 → `ErrOrderNotFound`；超时 → `ErrUnknownState`；未连接 → `ErrChannelDown` | 语义变更（从报错→幂等）= MAJOR |
 | `QueryOrder` | `LiveTrader.GetOrder(ctx, orderID)` 只读内存（Mock `pkg/live/mock_trader.go:398`，XTP `pkg/live/broker/xtp/xtp.go:432`） | contracts | 按 `ClientOrderID` 查；未知 → `ErrOrderNotFound`；通道不可用 → `ErrChannelDown`；查不到但可能已送达 → `OrderState{Status: unknown}` + `nil`（调用方据此继续查/对账，**不重发**） | 新增 = MINOR |
 | `QueryPositions` | `GetPositions(ctx)`（无 account；Mock `pkg/live/mock_trader.go:432`，XTP `pkg/live/broker/xtp/xtp.go:448`） | contracts | `accountID` 不匹配 → `ErrAccountMismatch`；通道不可用 → `ErrChannelDown`；空仓 → `[]`（不是 nil） | 新增 account 参数 = MINOR（新 port） |
 | `QueryAccount` | `GetAccount(ctx)`（Mock `pkg/live/mock_trader.go:448`，XTP `pkg/live/broker/xtp/xtp.go:464`） | contracts | 同 `QueryPositions`；返回的现金/市值是**柜台口径**，与本地账的差异由对账处理，网关不做裁决 | 新增 = MINOR |
 | `QueryFills` | **零实现**（`QueryFills` 在 Go 里零命中） | contracts | 只读；`since` **含**边界；按 `(FilledAt, FillID)` 升序；`FillID` 稳定，跨调用不重复；`accountID` 不匹配 → `ErrAccountMismatch`；不支持 → `ErrNotSupported` | 新增 = MINOR |
 | `QuerySettlement` | `reconciliation.BrokerQuerier.QuerySettlement`（`pkg/live/reconciliation/reconciliation.go:250`），生产用同一 trader 自检（`cmd/analysis/setup_reconciliation.go:127`） | contracts | 返回**账户快照**（现金/持仓/费用），不是逐笔成交；`accountID` 不匹配 → `ErrAccountMismatch`；不支持 → `ErrNotSupported`；超时 → `ErrChannelDown`（对账不猜） | 新增 = MINOR；口径从快照改逐笔 = MAJOR |
-| `EmergencyFlatten` | `LiveTrader.EmergencyFlatten`（Mock 真卖 `pkg/live/mock_trader.go:509`；XTP **伪造 Sold** `pkg/live/broker/xtp/xtp.go:508`） | contracts（`KillSwitch`） | 空仓 → 空 `Sold` + `nil`（幂等）；每个 `Sold` 必须对应**真实提交并确认**的订单，未确认的进 `Skipped`；不支持 → `ErrNotSupported`（**禁止**伪造成功）；通道不可用 → `ErrChannelDown` | 新增 = MINOR；fake success 修复 = MAJOR（行为变更） |
+| `EmergencyFlatten` | `LiveTrader.EmergencyFlatten`（Mock 真卖 `pkg/live/mock_trader.go:509`；XTP **伪造 Sold** `pkg/live/broker/xtp/xtp.go:508`） | contracts（`KillSwitch`） | 空仓 → 空 `Sold` + `nil`（幂等）；每个 `Sold` 必须对应**真实提交并确认**的订单，未确认的进 `Skipped`；**重放来的单不算本次清仓凭据**；清仓单 ID 必须区分轮次（同一笔持仓重入同 ID、卖掉后重建仓换 ID）；不支持 → `ErrNotSupported`（**禁止**伪造成功）；通道不可用 → `ErrChannelDown` | 新增 = MINOR；fake success 修复 = MAJOR（行为变更） |
 | `HealthCheck` | `LiveTrader.HealthCheck`（Mock 恒 nil `pkg/live/mock_trader.go:192`；XTP offline/未就绪返回错误 `pkg/live/broker/xtp/xtp.go:295`） | contracts（`HealthChecker`） | 就绪 → `nil`；未连接/offline/断连 → `ErrChannelDown`；**不得**返回「健康」而实际不能下单 | 新增 = MINOR |
 | `RiskPolicy.CheckOrder` | core/risk 的进程内裁决（`pkg/risk/interfaces.go:69`） | core（fusion 前）；**网关不调用、不 import** | 调用方在 `PlaceOrder` **之前**裁决；被拒 → `exec.order_rejected` 事件，**不进网关**；网关的错误集里没有「风控拒绝」 | 不改（QT-42 已对表） |
 | `LiveTrader` / `Broker`（今天） | `pkg/live/trader.go:42` / `pkg/live/engine.go:39` | core-only（迁移期） | `LiveTrader` 的 `SubmitOrder`/`GetOrder`/`GetPositions`/`GetAccount`/`EmergencyFlatten` 语义被目标 port 吸收；`Broker`（`Connect`/`Disconnect`/`SubmitOrder(domain.Order)`/…）是 `LiveEngine`/`SimulatedBroker` 的旧面，生产零调用方（AUD-34） | 删除 = MAJOR（core 内部，随 X6a 迁移） |
@@ -231,6 +231,7 @@ type HealthChecker interface {
 | 能力 | 状态 |
 |---|---|
 | `PlaceOrder` 幂等（同载荷重放 → `IdempotentReplay=true` 不发送；异载荷 → `duplicate_order`） | ✅ 有测试 |
+| **重放还原当初结论**（被拒的单重放仍返回 `ErrOrderRejected` / `ErrInsufficientBuyingPower`） | ✅ 有测试 |
 | 写前日志顺序：`Load` → 占位 `Save` → 发送 → 回执 `Save` | ✅ 有测试 |
 | 映射不可用（store nil / Load 失败 / 占位失败）→ `idempotency_store_unavailable` 且**不发送** | ✅ 有测试 |
 | 断连 → `channel_down` 且**不发送** | ✅ 有测试 |
@@ -239,20 +240,23 @@ type HealthChecker interface {
 | 柜台拒单 → `OrderAck{rejected}` 与 error **同时非 nil**（留痕） | ✅ 有测试 |
 | `CancelOrder`：已撤再撤 → 同终态 + nil；终态 → `order_not_cancelable` | ✅ 有测试 |
 | `QueryOrder`：本地无但映射有占位 → `OrderUnknown` + nil；映射也没有 → `order_not_found` | ✅ 有测试 |
+| 幂等域与本地订单索引**同口径**（都用本通道账户）→ 查单 / 撤单查得到 | ✅ 有测试 |
 | `QueryPositions` / `QueryAccount` / `QueryFills` / `QuerySettlement`（内存快照） | ✅ 有测试 |
 | `EmergencyFlatten`：只报真实成交，未确认进 `Skipped`；重入不重卖 | ✅ 有测试 |
+| **清仓单 ID 区分轮次**（持仓代次参与 ID）→ 不重放上一轮回执伪造清仓成功 | ✅ 有测试 |
 | `HealthCheck` / `Connect` / `Disconnect` | ✅ 有测试 |
 | **持久**幂等映射（跨重启） | ❌ 只有 `MemoryAckStore`；PG 落点未接（R2） |
 | `XTPTrader` | ❌ 未做（X6c） |
 | 对账口径定稿 + 真实 broker 侧 | ❌ 未做（X6b / R3） |
 | core 消费方切换（旧 `LiveTrader` / `Broker` 退役） | ❌ 未做（R4） |
+| 申报数量规则两实现共用同一份纯函数 | ❌ 未做（R5；Mock 内联了一份） |
 
-**故意取舍（都写在代码注释里，改前先读）**
+**五条故意取舍（都写在代码注释里，改前先读）**
 
 1. `AckStore` **注入式**：`nil` 就是 fail-closed，**不**提供"忘了注入就自动用内存"的兜底。
 2. 回执落盘失败返回 `unknown_state` 而非"下单成功"——映射里留的是占位，任何重放都会被拦。
 3. Mock 在没有价格时不撮合，**不**用 0 或猜的价格伪造成交。
-4. `EmergencyFlatten` 的 `Sold` 必须对应真实提交并确认的订单，其余一律进 `Skipped`。
-5. `ClientOrderID` 由调用方生成，网关**不改写、不派生**；`EmergencyFlatten` 用 `flatten:<symbol>:<qty>` 保证重入不重卖。
+4. `EmergencyFlatten` 的 `Sold` 必须对应真实提交并确认的订单，其余一律进 `Skipped`；清仓单 ID 带**持仓代次**，重放来的单**不算**本次清仓的凭据。
+5. `ClientOrderID` 由调用方生成，网关**不改写、不派生**（`EmergencyFlatten` 是唯一例外：它内部自造 ID，用 `flatten:<symbol>:<代次>:<qty>` 区分轮次）。
 
 **自检结论**：X6a 的 port / DTO / 错误语义 / 幂等顺序**已定形可用**；本仓**未接 core、未接 PG、XTP 未动**——真钱通道仍被"对账 + 持久幂等 + 熔断"三道闸挡在 X6c 之外。

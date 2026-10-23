@@ -21,7 +21,12 @@ verified-by: X6a 落地 + 文档同步（QT-45 施工 ①）
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
 >
-> **施工记录（2026-10-23，施工 ①）**：X6a 已落 `internal/gateway`——四个 port（`BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker`）+ DTO + 12 哨兵 + 内存 `Mock`（`ClientOrderID` 幂等、写前日志、`unknown_state` 语义），接口契约与 `api-schema.md` 逐条对齐；现状矩阵与取舍见 `ARCHITECTURE.md` §9.8。**仍是 🔶**：X6b（对账口径 / 真实 broker 侧）、X6c（`XTPTrader`）、X6d（独立进程）未做；幂等映射只有内存实现，持久落点待裁（R2）；core 侧旧 `LiveTrader` / `Broker` 未退役（R4）。
+> **施工记录（2026-10-23，施工 ①）**：X6a 已落 `internal/gateway`——四个 port（`BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker`）+ DTO + 12 哨兵 + 内存 `Mock`（`ClientOrderID` 幂等、写前日志、`unknown_state` 语义），接口契约与 `api-schema.md` 逐条对齐；现状矩阵与取舍见 `ARCHITECTURE.md` §9.8。**仍是 🔶**：X6b（对账口径 / 真实 broker 侧）、X6c（`XTPTrader`）、X6d（独立进程）未做；幂等映射只有内存实现，持久落点待裁（R2）；core 侧旧 `LiveTrader` / `Broker` 未退役（R4）；申报数量规则两实现共用的纯函数未抽（R5）。
+> 自审补正（2026-10-23，施工 ①）——**三处都会产生错误结论的缺陷**：
+> ① **清仓单 ID 区分轮次**：原 ID 只由 `(symbol, qty)` 组成 → 持仓卖掉后**又建回来**时，flatten 会重放上一轮的"已成交"回执，把一笔**根本没下单**的持仓报成"清仓成功"（伪造成功）。改用**持仓代次**参与 ID（`flatten:<symbol>:<代次>:<qty>`），并把**重放来的单**判为 `Skipped`（它不是本次清仓的凭据）。
+> ② **重放还原当初结论**：原先被柜台拒过的单，重放时返回 `ack` + `nil` error → 调用方会把"被拒"读成"受理成功"。改为重放仍返回同一个 `ErrOrderRejected` / `ErrInsufficientBuyingPower`（`api-schema.md` §2 要求拒单时 ack 与 error 同时非 nil）。
+> ③ **判重域与本地索引同口径**：原先幂等映射按**请求的** `AccountID` 存、本地订单状态按**通道的**账户索引 → 单账户开发态下两者不一致，查单 / 撤单查不到自己下的那一单。统一为通道账户（配置了账户时二者本就相等）。
+> 另加：四个 port 的**编译期接口断言**（方法集是冻结面，少一个方法就是实现方全红）。
 >
 > **M8 前置完成（2026-10-22）**：接口对表见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9。开工前先读 §9.1 的八条前置事实——今天不是「一个 port 两实现」而是**两个 port、三个实现**（F1）、没有上游幂等键（F2）、没有可区分的错误分类（F3）、XTP 是 offline skeleton 且 `EmergencyFlatten` 伪造成功（F4）、申报规则归属混用且 Mock 不校验（F5）、对账真实输入是 `QuerySettlement` 快照而非 `QueryFills` 且生产自检恒零差异（F6）、DTO 全在 core 且混入执行层语义（F7）、XTP 装配前置无检查（F8）。本单当时**仍 ⬜**（对表是开工前置，不是实现）；X6a 从「先定 `ClientOrderID` 幂等」开始，X6b 口径订正为快照，X6c 是从零实现而非接 SDK。
 > 对表自检（2026-10-22，基线 core `dbe4c68`）：core `path:line` 引用逐条命中；4 个目标 port / 9 个方法 / 12 个错误码与 `api-schema.md` 双向一致；破坏验证三腿（改错行号 / 删一个方法 / 删一个错误码）各自红，还原后绿。

@@ -162,6 +162,114 @@ func TestPlaceOrderRejectsDifferentPayload(t *testing.T) {
 	}
 }
 
+func TestPlaceOrderReplayRestoresRejection(t *testing.T) {
+	m, store, _ := newMock(t, MockOptions{
+		Cash: 5000,
+		Reject: func(req OrderRequest) (string, string) {
+			return "invalid_order", "lot rule from counter"
+		},
+	})
+
+	first, err := m.PlaceOrder(context.Background(), marketReq("c-1"))
+	if !errors.Is(err, ErrOrderRejected) {
+		t.Fatalf("first err = %v, want ErrOrderRejected", err)
+	}
+	if first == nil || first.Status != OrderRejected {
+		t.Fatalf("ack = %+v", first)
+	}
+
+	// 重放：当初被拒过，这一单就还是被拒的。不能因为"这次没报错"
+	// 就让调用方以为受理成功（api-schema §2：order_rejected 时 ack 与 error 同时非 nil）。
+	replay, err := m.PlaceOrder(context.Background(), marketReq("c-1"))
+	if !errors.Is(err, ErrOrderRejected) {
+		t.Fatalf("replay err = %v, want ErrOrderRejected (rejection must survive the replay)", err)
+	}
+	if replay == nil || replay.Status != OrderRejected || !replay.IdempotentReplay {
+		t.Fatalf("replay ack = %+v", replay)
+	}
+	// 重放不发送第二笔。
+	fills, _ := m.QueryFills(context.Background(), "ACC-1", time.Time{})
+	if len(fills) != 0 {
+		t.Fatalf("replay must not send: %d fills", len(fills))
+	}
+	rec, found, _ := store.Load(context.Background(), "ACC-1", "c-1")
+	if !found || rec.Ack.Status != OrderRejected {
+		t.Fatalf("rejected ack must stay persisted: %+v found=%v", rec, found)
+	}
+}
+
+func TestPlaceOrderReplayRestoresInsufficientBuyingPower(t *testing.T) {
+	m, _, _ := newMock(t, MockOptions{Cash: 100})
+
+	if _, err := m.PlaceOrder(context.Background(), marketReq("c-1")); !errors.Is(err, ErrInsufficientBuyingPower) {
+		t.Fatalf("first err = %v, want ErrInsufficientBuyingPower", err)
+	}
+	if _, err := m.PlaceOrder(context.Background(), marketReq("c-1")); !errors.Is(err, ErrInsufficientBuyingPower) {
+		t.Fatalf("replay err = %v, want ErrInsufficientBuyingPower", err)
+	}
+}
+
+func TestSingleAccountDevModeKeepsIdempotencyScope(t *testing.T) {
+	// 未配置通道账户 = 单账户开发态：不校验 accountID。
+	// 判重域仍必须是"账户 + ClientOrderID"这一对（此处账户为空），
+	// 不能退化成"只看 ClientOrderID"——那样两个账户的同 ID 单会互相顶掉。
+	c := newClock()
+	store := newFlakyStore()
+	m := NewMock(MockOptions{
+		Cash:   10000,
+		Now:    c.Now,
+		Store:  store,
+		Prices: map[string]float64{"600000": 10},
+	})
+	ctx := context.Background()
+
+	req := marketReq("c-1")
+	req.AccountID = "ACC-1"
+	ack, err := m.PlaceOrder(ctx, req)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if ack.Status != OrderFilled {
+		t.Fatalf("status = %q, want filled", ack.Status)
+	}
+
+	// 幂等：同账户同 ID 同载荷 → 重放，不发送第二笔。
+	replay, err := m.PlaceOrder(ctx, req)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if !replay.IdempotentReplay {
+		t.Fatal("replay must be marked IdempotentReplay")
+	}
+	fills, _ := m.QueryFills(ctx, "ACC-1", time.Time{})
+	if len(fills) != 1 {
+		t.Fatalf("replay sent a second order: %d fills", len(fills))
+	}
+
+	// 查单：本地状态与幂等映射同口径 → 查得到。
+	state, err := m.QueryOrder(ctx, "c-1")
+	if err != nil || state.Status != OrderFilled {
+		t.Fatalf("QueryOrder = %+v, err=%v", state, err)
+	}
+
+	// 撤单：同样查得到（本地索引与幂等映射必须同一口径）。
+	// 用限价单：它停在 accepted，可撤（成交的单本来就不可撤）。
+	limit := marketReq("c-2")
+	limit.AccountID = "ACC-1"
+	limit.OrderType = OrderLimit
+	limit.LimitPrice = 9.5
+	if _, err := m.PlaceOrder(ctx, limit); err != nil {
+		t.Fatalf("PlaceOrder(limit): %v", err)
+	}
+	cancelled, err := m.CancelOrder(ctx, CancelRequest{ClientOrderID: "c-2"})
+	if err != nil {
+		t.Fatalf("CancelOrder: %v", err)
+	}
+	if cancelled.Status != OrderCancelled {
+		t.Fatalf("status = %q, want cancelled", cancelled.Status)
+	}
+}
+
 func TestPlaceOrderFailsClosedWithoutStore(t *testing.T) {
 	m := NewMock(MockOptions{AccountID: "ACC-1", Cash: 5000, Prices: map[string]float64{"600000": 10}})
 	if _, err := m.PlaceOrder(context.Background(), marketReq("c-1")); !errors.Is(err, ErrIdempotencyStoreUnavailable) {
@@ -540,6 +648,79 @@ func TestEmergencyFlattenPutsUnconfirmedIntoSkipped(t *testing.T) {
 	}
 	if len(result.Skipped) != 1 || result.Skipped[0].Symbol != "600000" {
 		t.Fatalf("unexpected skipped: %+v", result.Skipped)
+	}
+}
+
+func TestEmergencyFlattenDoesNotReuseAnEarlierRoundAck(t *testing.T) {
+	m, _, _ := newMock(t, MockOptions{
+		Cash:   10000,
+		Prices: map[string]float64{"600000": 10},
+	})
+	ctx := context.Background()
+
+	// 第一轮：清掉一笔 200 股的持仓。
+	m.SeedPosition("600000", 200, 9)
+	first, err := m.EmergencyFlatten(ctx, "drill")
+	if err != nil {
+		t.Fatalf("EmergencyFlatten: %v", err)
+	}
+	if len(first.Sold) != 1 || first.SoldTotal != 200 {
+		t.Fatalf("first round sold = %+v", first.Sold)
+	}
+
+	// 第二轮：同一标的**又建仓** 200 股。旧口径下 ClientOrderID 相同
+	// （flatten:symbol:qty）→ 重放上一轮的"已成交"回执 → 会把这笔
+	// 根本没下单的持仓报成"清仓成功"（伪造成功）。
+	m.SeedPosition("600000", 200, 9)
+	second, err := m.EmergencyFlatten(ctx, "drill")
+	if err != nil {
+		t.Fatalf("EmergencyFlatten: %v", err)
+	}
+	if len(second.Sold) != 1 || second.SoldTotal != 200 {
+		t.Fatalf("second round sold = %+v (must actually place a new order)", second.Sold)
+	}
+	if second.Sold[0].ClientOrderID == first.Sold[0].ClientOrderID {
+		t.Fatalf("client_order_id reused across rounds: %q", second.Sold[0].ClientOrderID)
+	}
+	if second.Sold[0].BrokerOrderID == first.Sold[0].BrokerOrderID {
+		t.Fatalf("broker order id reused: %q (the second round must be a new order)", second.Sold[0].BrokerOrderID)
+	}
+	// 两轮各一笔真实卖出。
+	fills, _ := m.QueryFills(ctx, "ACC-1", time.Time{})
+	if len(fills) != 2 {
+		t.Fatalf("fills = %d, want 2 (one per round)", len(fills))
+	}
+}
+
+func TestEmergencyFlattenSkipsReplayedOrder(t *testing.T) {
+	m, _, _ := newMock(t, MockOptions{
+		Cash:   10000,
+		Prices: map[string]float64{"600000": 10},
+	})
+	ctx := context.Background()
+
+	// 同一笔持仓（不重新建仓）反复 flatten：ClientOrderID 不变 → 重放。
+	// 重放的那一单不是"本次清仓"的凭据 → 只能进 Skipped。
+	m.SeedPosition("600000", 100, 9)
+	if _, err := m.EmergencyFlatten(ctx, "drill"); err != nil {
+		t.Fatalf("EmergencyFlatten: %v", err)
+	}
+	// 手动把同一笔持仓再塞回来（同一代次：posGen 不变）。
+	m.mu.Lock()
+	m.positions["600000"] = &Position{
+		AccountID: "ACC-1", Symbol: "600000", Quantity: 100, AvailableQuantity: 100, AvgCost: 9,
+	}
+	m.mu.Unlock()
+
+	again, err := m.EmergencyFlatten(ctx, "drill")
+	if err != nil {
+		t.Fatalf("EmergencyFlatten: %v", err)
+	}
+	if len(again.Sold) != 0 {
+		t.Fatalf("a replayed order must not be reported as a fresh sale: %+v", again.Sold)
+	}
+	if len(again.Skipped) != 1 {
+		t.Fatalf("skipped = %+v, want 1", again.Skipped)
 	}
 }
 

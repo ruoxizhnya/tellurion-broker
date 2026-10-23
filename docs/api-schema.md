@@ -90,11 +90,14 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 
 - **`PlaceOrder` 幂等键 = `ClientOrderID`**（由调用方生成、重试不变；网关不改写、不生成）。判重范围 = `(AccountID, ClientOrderID)`。
 - 同 ID **同载荷** → 返回原 `OrderAck`（`IdempotentReplay=true`），不发送；同 ID **不同载荷** → `duplicate_order`，不发送。
+- **重放还原当初的结论**：当初被柜台拒过的单，重放时仍返回**同一个 error**（`order_rejected` / `insufficient_buying_power`）与那份 ack——被拒的单重放不能变成"受理成功"。
 - 幂等映射必须**持久**（跨重启、跨进程）：不可用 → `idempotency_store_unavailable`，**不发送**。落点见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.7 R2。
 - `CancelOrder` 幂等：已撤再撤 → 同终态 `OrderState` + `nil`；已成交 → `order_not_cancelable`。
 - `QueryOrder` / 查询面只读，天然幂等。
 - 重试只允许在**确定未送达**时进行（`rate_limited` / 显式失败）；`unknown_state` 必须先 `QueryOrder`。
 - `EmergencyFlatten` 重入不重复卖：已无持仓 → 空 `Sold` + `nil`；每个 `Sold` 必须对应真实提交并确认的订单，未确认进 `Skipped`。
+  - 清仓单的 `ClientOrderID` 必须**区分轮次**（同一笔持仓重入用同一个 ID；卖掉后重建仓要用新 ID）——否则会重放上一轮的已成交回执，把没下单的持仓报成清仓成功。
+  - 重放来的那一单**不算**本次清仓的凭据 → 只能进 `Skipped`。
 
 ## 4. 版本与兼容
 

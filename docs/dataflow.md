@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: M8 接口对表（QT-45 前置 ②）
+last-verified: 2026-10-23
+verified-by: X6a 落地 + 自审（重放还原结论 / 清仓单区分轮次）
 ---
 
 # Dataflow — tellurion-broker
@@ -34,6 +34,7 @@ core（订单意图 → RiskPolicy.CheckOrder 已裁决）
 1. 调用方先过 `RiskPolicy.CheckOrder`；被拒 → 发 `exec.order_rejected` 事件，**不进网关**。
 2. 调用方生成 `ClientOrderID`（重试不变）→ `PlaceOrder`。
 3. 网关查幂等映射：同 ID 同载荷 → 原 `OrderAck`（`IdempotentReplay=true`），**不发送**；同 ID 不同载荷 → `duplicate_order`。
+   - **重放必须还原当初的结论**：当初被柜台拒过（`order_rejected` / `insufficient_buying_power`），这一单就还是被拒的——重放返回 `ack` **与同一个 error**。若重放只给 `ack` + `nil`，调用方会把"被拒"读成"受理成功"（`api-schema.md` §2 要求拒单时 ack 与 error 同时非 nil）。
 4. 通道侧校验（最小单位 / 委托类型 / 申报数量 / 限流）→ 不合法 `invalid_order`，未发送。
 5. 未连接 / 熔断中 → `channel_down`，未发送。
 6. 适配器做柜台级换算 → 发柜台 → 返回 `OrderAck`（**受理 ≠ 成交**）。
@@ -54,6 +55,9 @@ core（订单意图 → RiskPolicy.CheckOrder 已裁决）
 ### 熔断与紧急清仓
 14. `HealthCheck` 失败 → `channel_down` → 熔断：停止下单 + 告警；恢复需显式重连，不自动重试。
 15. `EmergencyFlatten(reason)`：逐标的真实提交并确认；每个 `Sold` 必须有成交依据，未确认进 `Skipped`；未实现 → `not_supported`，**禁止伪造成功**。
+
+    - **清仓单 ID 必须区分轮次**：同一笔持仓反复清仓用同一个 `ClientOrderID`（重入幂等，不重复下单）；但持仓卖掉后**又建回来**要用新 ID——否则会重放上一轮的已成交回执，把一笔**根本没下单**的持仓报成清仓成功（伪造成功）。实现用**持仓代次**参与 ID。
+    - **重放的那一单不能算作本次清仓的凭据**：它对应的是上一次的操作 → 只能进 `Skipped`。
 
 ## 3. 失败模式（每一处 fail-closed 都要能指名）
 
