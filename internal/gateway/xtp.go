@@ -41,8 +41,8 @@ func (c XTPConfig) validate() error {
 // XTPDeps 是真钱通道的装配前置（ARCHITECTURE.md §9.7 R6：缺一构造期拒绝）。
 type XTPDeps struct {
 	// Acks 是**持久**幂等映射（R2）：跨重启可用的 `ClientOrderID → ack`。
-	// 注入 MemoryAckStore 等内存实现时构造不拦——持久性由装配方保证，这里
-	// 只拦「忘了注入」。
+	// 构造期要求 Durable()==true——内存实现（MemoryAckStore）会被拒绝，
+	// 「无幂等键不接真钱」由形状机械判定，不靠装配方记得。
 	Acks AckStore
 	// Settlement 是对账输入（R3）：没有真实 broker 侧快照就没有对账方案。
 	Settlement SettlementQuerier
@@ -78,6 +78,9 @@ func NewXTPTrader(cfg XTPConfig, deps XTPDeps) (*XTPTrader, error) {
 	}
 	if deps.Acks == nil {
 		return nil, fmt.Errorf("%w: persistent ack store is required (无幂等映射不接真钱)", ErrAssemblyIncomplete)
+	}
+	if !deps.Acks.Durable() {
+		return nil, fmt.Errorf("%w: ack store is not durable (无持久幂等映射不接真钱)", ErrAssemblyIncomplete)
 	}
 	if deps.Settlement == nil {
 		return nil, fmt.Errorf("%w: settlement querier is required (无对账方案不接真钱)", ErrAssemblyIncomplete)

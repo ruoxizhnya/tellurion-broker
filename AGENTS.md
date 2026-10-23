@@ -6,9 +6,9 @@
 
 交易通道网关：`XTPTrader` / `MockTrader` = 同一 port 的两个实现。**落地前必须先有对账方案**。
 
-**状态**：已启动（2026-10-23 施工 ②）——X6a 四 port + 内存 `Mock` 已落 `internal/gateway`；X6b 对账纯函数（快照口径 + 差异注入验收）已落 `internal/reconcile`；X6c 装配闸 + fail-closed 骨架已落；X6c 全量适配器（SDK）与 X6d 未做
+**状态**：已启动（2026-10-23 施工 ③）——X6a 四 port + 内存 `Mock` 已落 `internal/gateway`；X6b 对账纯函数（快照口径 + 差异注入验收）已落 `internal/reconcile`；X6c 装配闸 + fail-closed 骨架 + **持久幂等映射 `broker.order_acks`**（`internal/ackstore`，ADR 0002）已落；X6c 全量适配器（SDK）未做；X6d 按同日裁决**暂缓**
 
-**今天的实现**（本仓，2026-10-23）：`internal/gateway` 的 `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` 四个 port、DTO、12 个契约哨兵、`Mock`（`ClientOrderID` 幂等 + 写前日志 + `unknown_state`）、`MemoryAckStore`、`XTPTrader`（fail-closed 骨架：构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一即拒绝，已装配后所有方法恒 `channel_down`，零 fake success）；`internal/reconcile` 的快照口径对账纯函数。**未接 core、未接 PG、无 XTP SDK 链路**；细节见 `docs/ARCHITECTURE.md` §9.8。
+**今天的实现**（本仓，2026-10-23）：`internal/gateway` 的 `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` 四个 port、DTO、12 个契约哨兵、`Mock`（`ClientOrderID` 幂等 + 写前日志 + `unknown_state`）、`MemoryAckStore`、`XTPTrader`（fail-closed 骨架：构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一、或 `Acks.Durable()==false` 即拒绝，已装配后所有方法恒 `channel_down`，零 fake success）；`internal/reconcile` 的快照口径对账纯函数；`internal/ackstore` 的持久幂等映射 `broker.order_acks`（原子 `Reserve` + 回执写回）。**未接 core、无 XTP SDK 链路、未接真实柜台**（PG 只用于幂等映射）；细节见 `docs/ARCHITECTURE.md` §9.8。
 
 **迁出前的老实现**（core，待切读后退役）：`core:pkg/live`（`MockTrader` / order store / paper trading）+ `core:pkg/live/broker/xtp`（XTP 骨架）。本仓只搬**通道适配**，运行域留 core。
 
@@ -21,6 +21,7 @@ go test ./...
 ```
 
 - 这三条是 R1/R2 的判据：**单独 checkout 就能绿**。
+- 可选集成测试（无外部条件时自动 skip）：`BROKER_TEST_DSN='postgres://postgres@127.0.0.1:5432/tellurion_broker_test?sslmode=disable' go test ./internal/ackstore -count=1`（测 `broker.order_acks` 的原子占位 / 跨实例回读）。
 - 若某一步需要别的仓的源码目录才过，那是**边界画错了**——停下来修边界，**不要**加 `replace ../xxx` 绕过。
 - 本机同时改多个仓时可用 `go.work` 联调，但**它不入库**（`.gitignore` 已挡）。
 
@@ -50,8 +51,9 @@ go test ./...
 |---|---|---|
 | `github.com/ruoxizhnya/tellurion-contracts` | 待定（S2 后 `v0.1.0`） | `BrokerGateway` 契约 |
 | `github.com/ruoxizhnya/tellurion-kit` | 待定（S2 后 `v0.1.0`） | 日志 / HTTP |
+| `github.com/jackc/pgx/v5` | `v5.7.3` | `internal/ackstore` 的 PG 连接池与查询（幂等映射 `broker.order_acks`，ADR 0002）；版本与 core / kit / strategy 对齐 |
 
-> 今日 `go.mod` **零 require**：`internal/gateway` 只用 stdlib，port / DTO 暂由本仓定义，`BrokerGateway` 随 X6a 定稿后落 contracts（R4）。上表两项在真正引入前不动 `go.mod`。
+> 今日 `go.mod` 的**唯一直接依赖**是 `pgx v5.7.3`（其余是它的间接依赖）：`internal/gateway` / `internal/reconcile` 仍只用 stdlib；port / DTO 暂由本仓定义，`BrokerGateway` 随 X6a 定稿后落 contracts（R4）。
 
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。
 

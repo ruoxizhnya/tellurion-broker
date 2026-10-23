@@ -19,11 +19,11 @@ func newClock() *mockClock {
 
 // flakyStore 包装 MemoryAckStore，用来注入「映射不可用」与「回执落盘失败」。
 type flakyStore struct {
-	mu        sync.Mutex
-	inner     *MemoryAckStore
-	loadErr   error
-	failSave  func(n int) bool
-	saveCount int
+	mu         sync.Mutex
+	inner      *MemoryAckStore
+	loadErr    error
+	failWrite  func(n int) bool
+	writeCount int
 }
 
 func newFlakyStore() *flakyStore { return &flakyStore{inner: NewMemoryAckStore()} }
@@ -38,17 +38,41 @@ func (s *flakyStore) Load(ctx context.Context, accountID, clientOrderID string) 
 	return s.inner.Load(ctx, accountID, clientOrderID)
 }
 
-func (s *flakyStore) Save(ctx context.Context, accountID, clientOrderID string, rec IdempotencyRecord) error {
+// nextWrite 给「第 n 次写」编号并按 failWrite 注入失败。Reserve 是第 1 次写，
+// SaveAck 是第 2 次写（与旧实现的 Save 两次调用保持同一编号）。
+func (s *flakyStore) nextWrite() error {
 	s.mu.Lock()
-	s.saveCount++
-	n := s.saveCount
-	fail := s.failSave
+	s.writeCount++
+	n := s.writeCount
+	fail := s.failWrite
 	s.mu.Unlock()
 	if fail != nil && fail(n) {
 		return errors.New("store write failed")
 	}
-	return s.inner.Save(ctx, accountID, clientOrderID, rec)
+	return nil
 }
+
+func (s *flakyStore) Reserve(ctx context.Context, accountID, clientOrderID, fingerprint string) (IdempotencyRecord, bool, error) {
+	s.mu.Lock()
+	loadErr := s.loadErr
+	s.mu.Unlock()
+	if loadErr != nil {
+		return IdempotencyRecord{}, false, loadErr
+	}
+	if err := s.nextWrite(); err != nil {
+		return IdempotencyRecord{}, false, err
+	}
+	return s.inner.Reserve(ctx, accountID, clientOrderID, fingerprint)
+}
+
+func (s *flakyStore) SaveAck(ctx context.Context, accountID, clientOrderID string, rec IdempotencyRecord) error {
+	if err := s.nextWrite(); err != nil {
+		return err
+	}
+	return s.inner.SaveAck(ctx, accountID, clientOrderID, rec)
+}
+
+func (s *flakyStore) Durable() bool { return s.inner.Durable() }
 
 func newMock(t *testing.T, opts MockOptions) (*Mock, *flakyStore, *mockClock) {
 	t.Helper()
@@ -299,7 +323,7 @@ func TestPlaceOrderFailsClosedWhenStoreLoadFails(t *testing.T) {
 
 func TestPlaceOrderFailsClosedWhenReserveFails(t *testing.T) {
 	m, store, _ := newMock(t, MockOptions{Cash: 5000})
-	store.failSave = func(n int) bool { return n == 1 }
+	store.failWrite = func(n int) bool { return n == 1 }
 
 	if _, err := m.PlaceOrder(context.Background(), marketReq("c-1")); !errors.Is(err, ErrIdempotencyStoreUnavailable) {
 		t.Fatalf("err = %v, want ErrIdempotencyStoreUnavailable", err)
@@ -312,7 +336,7 @@ func TestPlaceOrderFailsClosedWhenReserveFails(t *testing.T) {
 
 func TestPlaceOrderReportsUnknownWhenAckCannotBePersisted(t *testing.T) {
 	m, store, _ := newMock(t, MockOptions{Cash: 5000})
-	store.failSave = func(n int) bool { return n == 2 }
+	store.failWrite = func(n int) bool { return n == 2 }
 
 	if _, err := m.PlaceOrder(context.Background(), marketReq("c-1")); !errors.Is(err, ErrUnknownState) {
 		t.Fatalf("err = %v, want ErrUnknownState", err)
@@ -476,11 +500,8 @@ func TestQueryOrderUnknownAndPending(t *testing.T) {
 		t.Fatalf("err = %v, want ErrOrderNotFound", err)
 	}
 	// 映射里有占位、本地无状态（模拟发出途中崩溃后的另一个进程）→ unknown + nil。
-	if err := store.Save(context.Background(), "ACC-1", "c-9", IdempotencyRecord{
-		RequestFingerprint: "fp",
-		Ack:                OrderAck{ClientOrderID: "c-9"},
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
+	if _, _, err := store.Reserve(context.Background(), "ACC-1", "c-9", "fp"); err != nil {
+		t.Fatalf("Reserve: %v", err)
 	}
 	state, err := m.QueryOrder(context.Background(), "c-9")
 	if err != nil {
@@ -756,5 +777,99 @@ func TestOrderStatusVocabulary(t *testing.T) {
 	}
 	if OrderStatus("degraded").Valid() {
 		t.Fatal("a fourth K9-like value must not be accepted")
+	}
+}
+
+// 并发同 ID：Reserve 的原子性是唯一防线。旧实现（Load 再 Save）在两边都读到
+// 未命中时会各发一笔——这条是那个缺陷的回归腿。
+func TestPlaceOrderConcurrentSameClientOrderIDSendsOnce(t *testing.T) {
+	m, _, _ := newMock(t, MockOptions{Cash: 1e9})
+
+	const n = 16
+	start := make(chan struct{})
+	acks := make([]*OrderAck, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			acks[i], errs[i] = m.PlaceOrder(context.Background(), marketReq("same-id"))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	fills, err := m.QueryFills(context.Background(), "ACC-1", time.Time{})
+	if err != nil {
+		t.Fatalf("QueryFills: %v", err)
+	}
+	if len(fills) != 1 {
+		t.Fatalf("same (account, client_order_id) produced %d fills, want exactly 1", len(fills))
+	}
+
+	accepted := 0
+	for i := 0; i < n; i++ {
+		switch {
+		case errs[i] == nil:
+			accepted++
+			if acks[i] == nil || acks[i].Status != OrderFilled {
+				t.Fatalf("call %d: nil error but ack = %+v", i, acks[i])
+			}
+		case errors.Is(errs[i], ErrUnknownState):
+			// 回执尚未写成的空档里读到占位：未决、未重发。合法。
+		default:
+			t.Fatalf("call %d: unexpected err = %v", i, errs[i])
+		}
+	}
+	if accepted == 0 {
+		t.Fatal("no call was accepted")
+	}
+}
+
+func TestMemoryAckStoreReserveIsAtomic(t *testing.T) {
+	store := NewMemoryAckStore()
+	const n = 32
+	created := make([]bool, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			_, ok, err := store.Reserve(context.Background(), "ACC-1", "same", "fp")
+			if err != nil {
+				t.Errorf("Reserve: %v", err)
+				return
+			}
+			created[i] = ok
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	winners := 0
+	for _, ok := range created {
+		if ok {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("Reserve winners = %d, want exactly 1", winners)
+	}
+}
+
+func TestMemoryAckStoreSaveAckRequiresReservation(t *testing.T) {
+	store := NewMemoryAckStore()
+	if err := store.SaveAck(context.Background(), "ACC-1", "unreserved", IdempotencyRecord{Ack: OrderAck{Status: OrderFilled}}); err == nil {
+		t.Fatal("SaveAck without a reservation must fail")
+	}
+}
+
+func TestMemoryAckStoreIsNotDurable(t *testing.T) {
+	if NewMemoryAckStore().Durable() {
+		t.Fatal("MemoryAckStore must report Durable=false; it cannot back real money")
 	}
 }

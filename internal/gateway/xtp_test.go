@@ -8,9 +8,14 @@ import (
 	"time"
 )
 
+// durableStore 让内存映射在测试里冒充持久实现（生产实现是 ackstore.PgStore）。
+type durableStore struct{ *MemoryAckStore }
+
+func (durableStore) Durable() bool { return true }
+
 func xtpDeps() XTPDeps {
 	m := NewMock(MockOptions{})
-	return XTPDeps{Acks: NewMemoryAckStore(), Settlement: m, Health: m}
+	return XTPDeps{Acks: durableStore{NewMemoryAckStore()}, Settlement: m, Health: m}
 }
 
 func TestNewXTPTrader_GateRejectsIncompleteAssembly(t *testing.T) {
@@ -20,8 +25,9 @@ func TestNewXTPTrader_GateRejectsIncompleteAssembly(t *testing.T) {
 		want string
 	}{
 		{"missing acks", XTPDeps{Settlement: NewMock(MockOptions{}), Health: NewMock(MockOptions{})}, "ack store"},
-		{"missing settlement", XTPDeps{Acks: NewMemoryAckStore(), Health: NewMock(MockOptions{})}, "settlement"},
-		{"missing health", XTPDeps{Acks: NewMemoryAckStore(), Settlement: NewMock(MockOptions{})}, "health"},
+		{"non-durable acks", XTPDeps{Acks: NewMemoryAckStore(), Settlement: NewMock(MockOptions{}), Health: NewMock(MockOptions{})}, "durable"},
+		{"missing settlement", XTPDeps{Acks: durableStore{NewMemoryAckStore()}, Health: NewMock(MockOptions{})}, "settlement"},
+		{"missing health", XTPDeps{Acks: durableStore{NewMemoryAckStore()}, Settlement: NewMock(MockOptions{})}, "health"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

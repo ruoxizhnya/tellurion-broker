@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-23
-verified-by: X6b 对账纯函数 + X6c 装配闸落地 + 文档同步（QT-45 施工 ②）
+verified-by: R2 裁决 + 持久幂等映射落地（ADR 0002 / X6c 幂等持久化）
 ---
 
 # API Schema — tellurion-broker
@@ -10,7 +10,7 @@ verified-by: X6b 对账纯函数 + X6c 装配闸落地 + 文档同步（QT-45 �
 > `BrokerGateway` 按"将来可远程"设计（DTO 序列化友好），但当前与实盘运行域同进程 —— 下单是延迟敏感路径，独立进程 = 每笔多一次网络跳。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
-> **今天 vs 目标**：本仓 `internal/gateway` 已落本文四个 port + DTO + 12 哨兵 + 内存 `Mock` + `XTPTrader` fail-closed 骨架（装配闸：缺幂等映射 / 对账 / 健康检查任一即构造期拒绝；已装配后全方法恒 `channel_down`，零 fake success），`internal/reconcile` 已落快照口径对账纯函数（X6a/X6b/装配闸，2026-10-23），**未接 core、未接 PG、无 XTP SDK 链路**；core 侧仍有 `LiveTrader`（Mock / XTP）与 `Broker`（`SimulatedBroker`）两套旧面待退役（R4）。现状矩阵与取舍见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8，八条实测事实见 §9.1（基线 core `dbe4c68`）。
+> **今天 vs 目标**：本仓 `internal/gateway` 已落本文四个 port + DTO + 12 哨兵 + 内存 `Mock` + `XTPTrader` fail-closed 骨架（装配闸：缺持久幂等映射 / 对账 / 健康检查任一即构造期拒绝；已装配后全方法恒 `channel_down`，零 fake success），`internal/reconcile` 已落快照口径对账纯函数，`internal/ackstore` 已落持久幂等映射 `broker.order_acks`（2026-10-23，ADR 0002），**未接 core、无 XTP SDK 链路**；core 侧仍有 `LiveTrader`（Mock / XTP）与 `Broker`（`SimulatedBroker`）两套旧面待退役（R4）。现状矩阵与取舍见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8，八条实测事实见 §9.1（基线 core `dbe4c68`）。
 > **port 的落点**：契约位是 **contracts**（`BrokerGateway` / 新 DTO 不随 S1 批量迁，随 X6a 定稿）；本仓是实现的物理归属，不是常驻服务（`tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2）。
 
 ## 1. 接口面（目标 port）
@@ -51,7 +51,9 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 | 实现 | port | 用途 | 现状 |
 |---|---|---|---|
 | `Mock`（`internal/gateway`） | `BrokerGateway` + `SettlementQuerier` + `KillSwitch` + `HealthChecker` | 本仓的新 MockTrader | **可用**（X6a）；注入式 `AckStore`，nil 即不发送；无价格不成交 |
-| `XTPTrader`（`internal/gateway`，本仓） | 四个 port + `KillSwitch` | 真实柜台（X6c） | **fail-closed 骨架 + 装配闸**：构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一 → `ErrAssemblyIncomplete`（构造路径哨兵，**不是第 13 个 wire code**）；已装配后所有方法恒 `channel_down`；SDK 从零实现未做 |
+| `XTPTrader`（`internal/gateway`，本仓） | 四个 port + `KillSwitch` | 真实柜台（X6c） | **fail-closed 骨架 + 装配闸**：构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一，或 `AckStore.Durable()==false` → `ErrAssemblyIncomplete`（构造路径哨兵，**不是第 13 个 wire code**）；已装配后所有方法恒 `channel_down`；SDK 从零实现未做 |
+| `PgStore`（`internal/ackstore`） | `AckStore`（装配 SPI，非四个 wire port） | 持久幂等映射（R2 已裁） | **可用**：`broker.order_acks`，原子 `Reserve`（`ON CONFLICT DO NOTHING`）+ 回执写回 + `Durable=true`；PG 集成测试按 `BROKER_TEST_DSN` 运行 |
+| `MemoryAckStore`（`internal/gateway`） | `AckStore` | 开发 / 测试 | 可用；**`Durable=false`**，进不了 XTP 装配闸 |
 | `Reconcile`（`internal/reconcile`） | 纯函数（非 port） | 快照口径对账（X6b） | **可用**；输入两侧共用 `AccountSnapshot`，七类差异 × 三级严重度，差异注入验收在册；真实 broker 侧快照归 X6c 全量 |
 | `MockTrader` | `LiveTrader`（旧） | 开发 / 回放 / 压测 | 可用；**无编译期断言**，且不做板块申报规则校验 |
 | `XTPTrader`（旧，core `pkg/live/broker/xtp`） | `LiveTrader`（旧） | 真实柜台 | **offline skeleton**：`Connect`/`SubmitOrder`/`CancelOrder` 恒返回「SDK not linked」；`EmergencyFlatten` 伪造成功 |
@@ -91,9 +93,10 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 ## 3. 幂等性与重试
 
 - **`PlaceOrder` 幂等键 = `ClientOrderID`**（由调用方生成、重试不变；网关不改写、不生成）。判重范围 = `(AccountID, ClientOrderID)`。
+- **发送权由 `AckStore.Reserve` 原子判定**：`Load` 再 `Save` 的两步形状会让并发同 ID 各自读到未命中、各发一笔（实测可复现）；PG 实现用 `INSERT ... ON CONFLICT DO NOTHING RETURNING`，内存实现用同一临界区。
 - 同 ID **同载荷** → 返回原 `OrderAck`（`IdempotentReplay=true`），不发送；同 ID **不同载荷** → `duplicate_order`，不发送。
 - **重放还原当初的结论**：当初被柜台拒过的单，重放时仍返回**同一个 error**（`order_rejected` / `insufficient_buying_power`）与那份 ack——被拒的单重放不能变成"受理成功"。
-- 幂等映射必须**持久**（跨重启、跨进程）：不可用 → `idempotency_store_unavailable`，**不发送**。落点见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.7 R2。
+- 幂等映射必须**持久**（跨重启、跨进程）：不可用 → `idempotency_store_unavailable`，**不发送**。落点已裁为 `broker.order_acks`（[ADR 0002](adr/0002-幂等映射落-broker-写前日志.md)、[`db-schema.md`](db-schema.md) §1.1）；`AckStore.Durable()` 让 XTP 装配闸拒绝内存实现。
 - `CancelOrder` 幂等：已撤再撤 → 同终态 `OrderState` + `nil`；已成交 → `order_not_cancelable`。
 - `QueryOrder` / 查询面只读，天然幂等。
 - 重试只允许在**确定未送达**时进行（`rate_limited` / 显式失败）；`unknown_state` 必须先 `QueryOrder`。

@@ -50,7 +50,7 @@ type HealthChecker interface {
 	HealthCheck(ctx context.Context) error
 }
 
-// IdempotencyRecord 是 `ClientOrderID → ack` 的持久映射（落点待裁 R2）。
+// IdempotencyRecord 是 `ClientOrderID → ack` 的持久映射（落点 = `broker.order_acks`，ADR 0002）。
 //
 // `RequestFingerprint` 用于区分「重放」与「撞 ID 用错载荷」；`Ack.Status` 为空
 // 表示**已占位但结果未知**（发出途中崩溃）——加载到这种记录必须返回
@@ -66,6 +66,19 @@ type IdempotencyRecord struct {
 // 任何实现层故障都要作为 error 冒泡，让网关翻译成
 // ErrIdempotencyStoreUnavailable 并且**不发送**。
 type AckStore interface {
+	// Load 只读；用于重放与查单，不产生副作用。
 	Load(ctx context.Context, accountID, clientOrderID string) (IdempotencyRecord, bool, error)
-	Save(ctx context.Context, accountID, clientOrderID string, rec IdempotencyRecord) error
+	// Reserve 原子占位（write-ahead）：created=true 表示**本次调用拿到发送权**；
+	// created=false 返回已有记录，由调用方按指纹 / 回执分诊。
+	//
+	// 「查未命中 + 写入占位」必须是一步原子操作——分成 Load 再 Save
+	// 会让两个并发同 ID 调用各自读到未命中，然后各发一笔（实测可复现）。
+	// PG 实现用 `INSERT ... ON CONFLICT DO NOTHING RETURNING`。
+	Reserve(ctx context.Context, accountID, clientOrderID, fingerprint string) (existing IdempotencyRecord, created bool, err error)
+	// SaveAck 写回执。占位必须已由 Reserve 建立；没有占位就是实现/调用错误，
+	// 必须报错而不是静默插入（否则等于绕过发送权判定）。
+	SaveAck(ctx context.Context, accountID, clientOrderID string, rec IdempotencyRecord) error
+	// Durable 报告实现是否跨重启持久。XTPTrader 的装配闸据此拒绝内存实现
+	// （「无幂等键不接真钱」不能只靠装配方记得）。
+	Durable() bool
 }

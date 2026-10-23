@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-23
-verified-by: X6b 对账纯函数 + X6c 装配闸落地 + 文档同步（QT-45 施工 ②）
+verified-by: R2 裁决 + 持久幂等映射落地（ADR 0002）；X6d 按同日裁决暂缓
 ---
 
 # 架构 — tellurion-broker
@@ -22,7 +22,7 @@ core（订单意图）
   └── XTPTrader   → 券商柜台（最小单位/委托类型/限流在适配器内）
       ↓
 成交回报 / 持仓 ──► core 的 quant（实盘运行域；将来建 exec 镜像须先立 ADR）
-      └── QueryFills ──► 对账（risk 留痕）
+      └── QuerySettlement（账户快照）──► 对账（risk 留痕）
 ```
 
 ## 3. 组件职责
@@ -32,7 +32,7 @@ core（订单意图）
 | `BrokerGateway` port | 下单 / 撤单 / 查单 / 持仓 / 成交 | 不做风控 |
 | Mock 实现 | 开发与回放 | 不模拟复杂柜台规则 |
 | XTP 适配器 | 柜台协议 + 归一化 | 不决定"能不能下" |
-| 对账输入 | `QueryFills` | 不做对账判断（归 risk） |
+| 对账输入 | `QuerySettlement`（账户快照） | 不做对账判断（归 risk） |
 
 ## 4. 三份契约（功能的边界就在这三份文件里）
 
@@ -60,7 +60,7 @@ contracts（BrokerGateway / OrderRequest / Fill）+ kit（logging/http）
 - 不做风控、不做策略、不做撮合
 - 不持有订单真相
 - 不做资金划转
-- 现在不做独立进程（触发条件：多账户共用通道 / 通道级独立高可用）
+- 现在不做独立进程（触发条件：多账户共用通道 / 通道级独立高可用）。X6d 于 2026-10-23 裁决**暂缓**，见 `TASKS.md`。
 
 ## 8. 分期与状态
 
@@ -69,7 +69,7 @@ contracts（BrokerGateway / OrderRequest / Fill）+ kit（logging/http）
 | X6a | port 定义 + MockTrader 🔶（2026-10-23：port / DTO / 内存 Mock / `ClientOrderID` 幂等已落 `internal/gateway`；**未接 core**） | 无 |
 | X6b | 对账口径定稿 🔶（2026-10-23 施工 ②：快照口径纯函数 + 差异注入验收已落 `internal/reconcile`；真实 broker 侧 `QuerySettlement` 归 X6c 全量） | risk 的 `QueryFills` 契约 |
 | X6c | XTPTrader 🔶（2026-10-23 施工 ②：装配闸 + fail-closed 骨架已落 `internal/gateway/xtp.go`——构造期强制注入幂等 / 对账 / 健康，缺一 error，已装配后全方法 `channel_down`；SDK 从零实现未做） | 对账 + 幂等 + 熔断三项就位 |
-| X6d | 独立进程（可选） | 多账户 / 多策略共用通道 |
+| X6d | 独立进程（可选）——**2026-10-23 裁决：暂缓**，保持非目标；触发条件（多账户共用通道 / 通道级独立高可用）未到 | — |
 
 ## 9. 接口对表（M8 前置 · ✅ 2026-10-22）
 
@@ -142,7 +142,7 @@ type HealthChecker interface {
 | `HealthCheck` | `LiveTrader.HealthCheck`（Mock 恒 nil `pkg/live/mock_trader.go:192`；XTP offline/未就绪返回错误 `pkg/live/broker/xtp/xtp.go:295`） | contracts（`HealthChecker`） | 就绪 → `nil`；未连接/offline/断连 → `ErrChannelDown`；**不得**返回「健康」而实际不能下单 | 新增 = MINOR |
 | `RiskPolicy.CheckOrder` | core/risk 的进程内裁决（`pkg/risk/interfaces.go:69`） | core（fusion 前）；**网关不调用、不 import** | 调用方在 `PlaceOrder` **之前**裁决；被拒 → `exec.order_rejected` 事件，**不进网关**；网关的错误集里没有「风控拒绝」 | 不改（QT-42 已对表） |
 | `LiveTrader` / `Broker`（今天） | `pkg/live/trader.go:42` / `pkg/live/engine.go:39` | core-only（迁移期） | `LiveTrader` 的 `SubmitOrder`/`GetOrder`/`GetPositions`/`GetAccount`/`EmergencyFlatten` 语义被目标 port 吸收；`Broker`（`Connect`/`Disconnect`/`SubmitOrder(domain.Order)`/…）是 `LiveEngine`/`SimulatedBroker` 的旧面，生产零调用方（AUD-34） | 删除 = MAJOR（core 内部，随 X6a 迁移） |
-| `OrderStore`（今天） | `pkg/live/order_store.go:35` | core-only | 订单真相的持久化面，**不属本仓**；若幂等映射复用它，必须是注入的 port（R2），网关不能直连表 | 不改；复用 = 见 R2 |
+| `OrderStore`（今天） | `pkg/live/order_store.go:35` | core-only | 订单真相的持久化面，**不属本仓**；幂等映射**不复用它**（R2 已裁：独立表 `broker.order_acks`，ADR 0002） | 不改 |
 
 ### 9.3 B 组 · DTO 与状态词表
 
@@ -167,7 +167,7 @@ type HealthChecker interface {
 
 | 调用 | 今天 | 目标签名 | 错误码（本表冻结） | 幂等 / 重试 |
 |---|---|---|---|---|
-| `PlaceOrder` | `SubmitOrder` 六参，无幂等键（`pkg/live/mock_trader.go:207`） | `PlaceOrder(ctx, OrderRequest) (*OrderAck, error)` | `order_rejected` / `unknown_state` / `channel_down` / `duplicate_order` / `invalid_order` / `rate_limited` / `not_supported` / `insufficient_buying_power` / `idempotency_store_unavailable` | 同 `ClientOrderID` 同载荷 → 原 ack；不同载荷 → `duplicate_order`；`unknown_state` **只许查单**，不许重发；`rate_limited` 仅在**确定未送达**时退避重试 |
+| `PlaceOrder` | `SubmitOrder` 六参，无幂等键（`pkg/live/mock_trader.go:207`） | `PlaceOrder(ctx, OrderRequest) (*OrderAck, error)` | `order_rejected` / `unknown_state` / `channel_down` / `duplicate_order` / `invalid_order` / `rate_limited` / `not_supported` / `insufficient_buying_power` / `idempotency_store_unavailable` | **发送权由 `Reserve` 原子判定**；同 `ClientOrderID` 同载荷 → 原 ack；不同载荷 → `duplicate_order`；`unknown_state` **只许查单**，不许重发；`rate_limited` 仅在**确定未送达**时退避重试 |
 | `CancelOrder` | 已撤再撤报错（`pkg/live/mock_trader.go:380`） | `CancelOrder(ctx, CancelRequest) (*OrderState, error)` | `order_not_found` / `order_not_cancelable` / `unknown_state` / `channel_down` / `rate_limited` / `not_supported` | 已撤再撤 → 同终态；已成交 → `order_not_cancelable`；超时 → `unknown_state`（查单） |
 | `QueryOrder` | `GetOrder` 只读内存（`pkg/live/broker/xtp/xtp.go:432`） | `QueryOrder(ctx, clientOrderID) (*OrderState, error)` | `order_not_found` / `channel_down` / `not_supported` | 只读；`unknown` 状态下继续查/对账，不推断 |
 | `QueryPositions` | `GetPositions` 无 account（`pkg/live/mock_trader.go:432`） | `QueryPositions(ctx, accountID) ([]Position, error)` | `account_mismatch` / `channel_down` / `not_supported` | 只读 |
@@ -179,21 +179,22 @@ type HealthChecker interface {
 
 **fail-closed 四条**：① 风控拒绝**不进网关**（调用方先过 `RiskPolicy.CheckOrder`，被拒发 `exec.order_rejected`）；② 幂等映射不可用 → `idempotency_store_unavailable`，**不发送**；③ 未连接 → `channel_down`，不发送；④ 发出后超时 → `unknown_state`，**禁止重发**，只能查单/对账。
 
-### 9.5 D 组 · 持久化面（本仓不建表）
+### 9.5 D 组 · 持久化面（本仓只持一张通道自有表）
 
 | 数据 | 归属 / 落点 | 判据 |
 |---|---|---|
 | 订单 / 成交 / 持仓快照 | **现状 core `quant`**；最终归属待裁 **U2**（`tellurion:docs/design/qt-decoupling/repo-inventory.md` §3.1） | 网关只透传柜台状态，**不持有业务表**；要建 `exec` 镜像 schema 必须先立 ADR |
-| `ClientOrderID → BrokerOrderID / ack` 幂等映射 | **待裁 R2** | 必须**持久**（跨重启、跨进程）；不可用 → `ErrIdempotencyStoreUnavailable` 且不发送。放在 core 的 order store（注入 port）还是适配器自有加密存储，R2 定 |
+| `ClientOrderID → BrokerOrderID / ack` 幂等映射 | **本仓 `broker.order_acks`**（ADR 0002；结构见 `docs/db-schema.md` §1.1） | 写前日志，**不是订单真相**；`AckStore.Reserve` 原子判定发送权；`Durable()` 让装配闸拒绝内存实现 |
 | 对账报告 / 差异 | `tellurion-risk`（`risk` schema，X3） | 网关只提供 `QuerySettlement` 快照；不写对账表 |
 | 通道配置 / 密钥 | 网关自有配置（加密存储） | 环境变量 / 密钥管理；**禁止**明文进库、进代码、进日志；`Config.Password` 的 `yaml` tag 也要在序列化/日志路径脱敏（R8） |
-| `OrderStore`（core） | core `quant` | 网关**不直连**这张表；幂等映射若复用，走注入 port（R2） |
+| `OrderStore`（core） | core `quant` | 网关**不直连**这张表；幂等映射已裁为独立表（ADR 0002），不复用它 |
 
 ### 9.6 E 组 · 版本策略
 
 | 面 | 稳定性 | 变更规则 |
 |---|---|---|
 | `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` 方法集 | 新增（X6a 定稿后 frozen） | **加方法 = MAJOR**（所有实现全红）；新能力走**独立 port** = MINOR |
+| `AckStore` 装配 SPI（`Load` / `Reserve` / `SaveAck` / `Durable`） | 新增（施工 ③ 定形） | 改发送权语义 = MAJOR（会造成重复下单）；加方法 = MAJOR（所有实现全红） |
 | `OrderRequest` / `OrderAck` / `OrderState` 等 DTO 字段 | stable | 加字段 = MINOR（旧读者忽略未知字段）；改名 / 删除 / 改单位 = MAJOR |
 | `OrderStatus` 八值 | stable | 加**非终态** = MINOR（旧客户端按未知处理）；加**终态** = MAJOR；`unknown` 的未决语义 = 冻结 |
 | 错误哨兵（12 code） | stable | **加**新哨兵 = MINOR（调用方按 `errors.Is` 匹配，未知错误按 `channel_down` 兜底）；改某个 code 的可重试性/含义 = MAJOR |
@@ -202,12 +203,12 @@ type HealthChecker interface {
 | `LiveTrader` / `Broker`（旧 port） | deprecated | 随 X6a 迁移删除 = MAJOR（core 内部）；`SimulatedBroker` 去留 = R4 |
 | XTP 适配器 | 内部 | 可独立升级，不改变 port；新增柜台特性不得泄漏进 contracts |
 
-### 9.7 R 组 · 待裁事项（不落地不阻塞对表，但阻塞实现）
+### 9.7 R 组 · 待裁 / 已裁事项（不落地不阻塞对表，但阻塞实现）
 
 | # | 事项 | 现状 / 冲突 | 建议裁决 |
 |---|---|---|---|
 | R1 | **订单/成交/持仓最终归属（U2）** | 现状登记 core `quant`；`run` 已排除；`exec` 镜像 schema 未裁 | 维持「现状 core `quant`」到 U2 裁决；裁决前不建表；建 `exec` 先立 ADR |
-| R2 | **幂等映射的持久化** | 今天没有 `ClientOrderID`；Mock 的 `orders` map 只在内存；XTP 靠柜台单号 | 二选一：(a) 柜台原生支持 client-order-id 幂等（优先；适配器只透传）；(b) 注入 core 的 order store 做 `ClientOrderID → ack` 映射（跨重启必须持久）。**不可用即不发送**；实现前 X6a 不完整 |
+| R2 | **幂等映射的持久化** | ✅ **已裁（2026-10-23）**：落本仓 `broker.order_acks`（ADR 0002）；`AckStore` 改为 `Load` / `Reserve`（原子占位）/ `SaveAck` / `Durable`；柜台原生 `client-order-id` 只作第二道防线。否掉 core order store（无表 / 无列 / U2 未裁，X6d 后也不成立）与本地文件 WAL（单写者、真钱前仍要换 PG） | — |
 | R3 | **对账口径与真实 broker 侧** | 生产是 `traderAccountView` 自检（local=broker，差异恒零）；XTP 未实现 `BrokerQuerier`；`FeeSnap` 恒零 | X6b 定「快照口径」；X6c 必须提供真实 broker 侧 `QuerySettlement`；验收腿要有人为注入差异（`driftedBrokerView` 已有测试样板），不能只跑零差异 |
 | R4 | **port 归属与旧接口处置** | `BrokerGateway` 零实现；`LiveTrader`/`Broker` 两套旧面；`SimulatedBroker` 生产零调用方（AUD-34）；contracts 登记「`BrokerGateway` 未定形 / S1 不落」 | port + DTO 最终落 contracts（core 消费 + 本仓实现 = 两个使用方）；X6a 先让 Mock 同时满足旧 `LiveTrader`（core 内）与新 port（适配器薄层），再切消费方；`SimulatedBroker` 随 `LiveEngine` 一起退役或降为测试替身。「S1 不落」= 不随 QT-05 批量迁，不等于永远不落 |
 | R5 | **申报规则的所有权** | `risk.ValidateOrderQuantity`（`pkg/risk/lot.go:136`）是交易所规则，却住在 risk 包；XTP 调它，Mock 不调 | 移到通道侧纯函数（contracts 或 gateway 内部的 `lot` 包），**两个实现共用**；`RiskPolicy` 不再导出该规则；迁移期保留 alias 以避免 core 改动扩散 |
@@ -215,17 +216,19 @@ type HealthChecker interface {
 | R7 | **kill-switch 的授权与审计** | `EmergencyFlatten` 绕过 T+1；XTP 侧无真实成交；谁有权触发未定 | 独立 `KillSwitch` port；调用方必须带运维身份与 reason；逐标的落审计（`bypassed_t1`）；与 QT-50 ④ 的鉴权矩阵合流 |
 | R8 | **密钥脱敏** | `Config.Password` `json:"-"` 但 `yaml:"password"`（`pkg/live/broker/xtp/xtp.go:119`） | 配置结构加 `String()`/日志脱敏；禁止把 `Config` 整体打进日志；密钥只从环境/密钥管理注入；加一条「日志里不出现 password」的测试 |
 
-### 9.8 实现现状（2026-10-23，施工 ① + ②）
+### 9.8 实现现状（2026-10-23，施工 ① + ② + ③）
 
-**落地包**：`internal/gateway` + `internal/reconcile`（本仓仅有的两个实现包，只用 stdlib，`go.mod` 零 require）。
+**落地包**：`internal/gateway` + `internal/reconcile` + `internal/ackstore`（前两者只用 stdlib；`ackstore` 引 `pgx v5.7.3`）。
 
 | 文件 | 内容 |
 |---|---|
 | `model.go` | `Side` / `OrderType` / `OrderStatus` 八值 + `Valid()` / `Terminal()`；`OrderRequest.Fingerprint()`；`OrderAck` / `CancelRequest` / `OrderState` / `Fill` / `Position` / `AccountSnapshot` / `EmergencyFlattenResult` |
 | `errors.go` | 12 个契约哨兵（与 `api-schema.md` §2 一一对应） |
-| `ports.go` | `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` / `AckStore`（+ `IdempotencyRecord`） |
-| `mock.go` | `Mock` 实现四个 port + `MemoryAckStore`（仅开发/测试用） |
-| `xtp.go`（施工 ②） | `XTPTrader` fail-closed 骨架 + 装配闸：`NewXTPTrader` 构造期强制注入 `AckStore` / `SettlementQuerier` / `HealthChecker`（缺一 → `ErrAssemblyIncomplete`，构造路径哨兵、非 wire code）；已装配后**所有**方法（含 `EmergencyFlatten`）恒 `ErrChannelDown`；`XTPConfig` 无密钥字段（R8） |
+| `ports.go` | `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` / `AckStore`（`Load` / `Reserve` / `SaveAck` / `Durable` + `IdempotencyRecord`） |
+| `mock.go` | `Mock` 实现四个 port + `MemoryAckStore`（仅开发/测试；`Durable=false`） |
+| `xtp.go`（施工 ②） | `XTPTrader` fail-closed 骨架 + 装配闸：`NewXTPTrader` 构造期强制注入 `AckStore` / `SettlementQuerier` / `HealthChecker`（缺一或 `Acks.Durable()==false` → `ErrAssemblyIncomplete`，构造路径哨兵、非 wire code）；已装配后**所有**方法（含 `EmergencyFlatten`）恒 `ErrChannelDown`；`XTPConfig` 无密钥字段（R8） |
+| `ackstore/ddl.go`（施工 ③） | `broker.order_acks` 的唯一 DDL（幂等、无版本表）+ `Migrate` 的语句源 |
+| `ackstore/pg.go`（施工 ③） | `AckStore` 的 PG 实现：原子 `Reserve`（`INSERT ... ON CONFLICT DO NOTHING RETURNING`）、`SaveAck`（只更新已占位行）、`Load`、`Durable=true`、`Migrate` |
 | `reconcile/reconcile.go`（施工 ②） | 快照口径对账纯函数：两侧共用 `AccountSnapshot`（F6），七类差异 × 三级严重度，容差沿用 core 迁出口径（现金 0.01 / 数量 0 / 市值 0.5% 仅数量相符时比 / 费用 0.01 / 时间漂移 60s），nil / 账户不符 / 重复标的 fail-loud，固定发射顺序，零差异返回空非 nil |
 
 **能跑 vs 只是接口就位**
@@ -247,19 +250,21 @@ type HealthChecker interface {
 | `EmergencyFlatten`：只报真实成交，未确认进 `Skipped`；重入不重卖 | ✅ 有测试 |
 | **清仓单 ID 区分轮次**（持仓代次参与 ID）→ 不重放上一轮回执伪造清仓成功 | ✅ 有测试 |
 | `HealthCheck` / `Connect` / `Disconnect` | ✅ 有测试 |
-| **持久**幂等映射（跨重启） | ❌ 只有 `MemoryAckStore`；PG 落点未接（R2） |
-| `XTPTrader` **装配闸**（构造期缺幂等 / 对账 / 健康任一 → error，即「无幂等键不接真钱」护栏） | ✅ 有测试（X6c 施工 ②；`ErrAssemblyIncomplete` 含缺哪个依赖的说明） |
+| **持久**幂等映射（跨重启） | ✅ `internal/ackstore` 的 `PgStore`（`broker.order_acks`，ADR 0002）；回执跨连接池回读有集成测试（`BROKER_TEST_DSN`） |
+| **并发同 ID 只出一个发送权** | ✅ `Reserve` 原子占位；内存 / PG 各有并发腿（破坏临界区后 16/16 重单，已做破坏验证） |
+| `XTPTrader` **装配闸**（构造期缺幂等 / 对账 / 健康任一 → error，即「无幂等键不接真钱」护栏） | ✅ 有测试（X6c 施工 ②）；**并拒绝 `Durable()==false` 的内存实现**（施工 ③） |
 | `XTPTrader` **全方法 fail-closed**（已装配后恒 `channel_down`，零 fake success） | ✅ 有测试；SDK 真实实现 ❌（X6c 全量：下单/撤单/查单/回报/心跳/重连/限流） |
 | 对账纯函数（快照口径 + **差异注入验收**九腿） | ✅ 有测试（X6b 施工 ②）；真实 broker 侧 `QuerySettlement` ❌（归 X6c）；对账留痕进 risk 未接（X3） |
 | core 消费方切换（旧 `LiveTrader` / `Broker` 退役） | ❌ 未做（R4） |
 | 申报数量规则两实现共用同一份纯函数 | ❌ 未做（R5；Mock 内联了一份） |
 
-**五条故意取舍（都写在代码注释里，改前先读）**
+**六条故意取舍（都写在代码注释里，改前先读）**
 
 1. `AckStore` **注入式**：`nil` 就是 fail-closed，**不**提供"忘了注入就自动用内存"的兜底。
 2. 回执落盘失败返回 `unknown_state` 而非"下单成功"——映射里留的是占位，任何重放都会被拦。
 3. Mock 在没有价格时不撮合，**不**用 0 或猜的价格伪造成交。
 4. `EmergencyFlatten` 的 `Sold` 必须对应真实提交并确认的订单，其余一律进 `Skipped`；清仓单 ID 带**持仓代次**，重放来的单**不算**本次清仓的凭据。
 5. `ClientOrderID` 由调用方生成，网关**不改写、不派生**（`EmergencyFlatten` 是唯一例外：它内部自造 ID，用 `flatten:<symbol>:<代次>:<qty>` 区分轮次）。
+6. **发送权由 `Reserve` 一步判定**：不提供「`Load` 再 `Save`」的先查后写形状——那正是并发同 ID 重单的来源（实测可复现）。`SaveAck` 只能写已占位的行，没有占位就报错。
 
-**自检结论**：X6a 的 port / DTO / 错误语义 / 幂等顺序**已定形可用**；X6b 的口径已定稿为纯函数（差异注入验收在册）；X6c 的装配闸已把「无幂等键不接真钱」变成构造期可机械拒绝的护栏。本仓仍**未接 core、未接 PG、无 XTP SDK 链路**——真钱通道现在被「装配闸（已落）+ 全量适配器（未做）+ 持久幂等映射（R2）」挡在 X6c 全量之外。
+**自检结论**：X6a 的 port / DTO / 错误语义 / 幂等顺序已定形可用；X6b 的口径已定稿为纯函数（差异注入验收在册）；X6c 的装配闸已把「无幂等键不接真钱」变成构造期可机械拒绝的护栏（并拒绝内存映射）；R2 已裁，持久幂等映射 `broker.order_acks` 已落。本仓仍**未接 core、无 XTP SDK 链路、未接真实柜台**——真钱通道现在只差 X6c 全量适配器（下单 / 撤单 / 查单 / 回报 / 心跳 / 重连 / 限流）。X6d 按 2026-10-23 裁决暂缓。

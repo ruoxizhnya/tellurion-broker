@@ -137,7 +137,7 @@ func (m *Mock) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-// PlaceOrder 见 BrokerGateway。发送前必然先占位幂等映射；占位失败就不发送。
+// PlaceOrder 见 BrokerGateway。发送前必然先原子占位；占位失败或没拿到发送权就不发送。
 //
 // **幂等域 = 本通道服务的账户**（m.accountID）+ ClientOrderID，不是请求里的
 // AccountID：配置了账户时两者必然相等（validate → checkAccount 拦住不匹配的），
@@ -155,49 +155,51 @@ func (m *Mock) PlaceOrder(ctx context.Context, req OrderRequest) (*OrderAck, err
 	}
 
 	fingerprint := req.Fingerprint()
-	rec, found, err := m.store.Load(ctx, m.accountID, req.ClientOrderID)
-	if err != nil {
+	// 快路径：映射里已有结论就原样还原。重放不需要通道，所以这一读在连接判定之前。
+	if rec, found, err := m.store.Load(ctx, m.accountID, req.ClientOrderID); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrIdempotencyStoreUnavailable, err)
-	}
-	if found {
-		if rec.RequestFingerprint != fingerprint {
-			return nil, fmt.Errorf("%w: client_order_id %q was used with a different payload", ErrDuplicateOrder, req.ClientOrderID)
-		}
-		if rec.Ack.Status == "" {
-			// 占位在、回执没写成：说明发出后就没结论。禁止重发。
-			return nil, fmt.Errorf("%w: client_order_id %q has no acknowledgement", ErrUnknownState, req.ClientOrderID)
-		}
-		ack := rec.Ack
-		ack.IdempotentReplay = true
-		// 重放**原样还原**当初的结论：被柜台拒过的单重放仍然是拒单
-		// （docs/api-schema.md §2：order_rejected 时 ack 与 error 同时非 nil），
-		// 不能因为"这次没报错"就被调用方当成受理成功。
-		if err := ackTerminalError(ack); err != nil {
-			return &ack, err
-		}
-		return &ack, nil
+	} else if found {
+		return replayAck(req, fingerprint, rec)
 	}
 
 	if !m.isConnected() {
 		return nil, fmt.Errorf("%w: mock channel is down", ErrChannelDown)
 	}
-	// 先占位再发送：占位写不进去就不许出门。
-	if err := m.store.Save(ctx, m.accountID, req.ClientOrderID, IdempotencyRecord{
-		RequestFingerprint: fingerprint,
-		Ack:                OrderAck{ClientOrderID: req.ClientOrderID},
-	}); err != nil {
+	// 原子占位：并发同 ID 只有一个调用拿到发送权，其余走重放分诊。
+	if existing, created, err := m.store.Reserve(ctx, m.accountID, req.ClientOrderID, fingerprint); err != nil {
 		return nil, fmt.Errorf("%w: reserve: %v", ErrIdempotencyStoreUnavailable, err)
+	} else if !created {
+		return replayAck(req, fingerprint, existing)
 	}
 
 	ack, err := m.execute(req)
 	// 回执必须落盘：落不下就诚实地报"状态未知"（映射里留的是占位，重放也不会重发）。
-	if saveErr := m.store.Save(ctx, m.accountID, req.ClientOrderID, IdempotencyRecord{
+	if saveErr := m.store.SaveAck(ctx, m.accountID, req.ClientOrderID, IdempotencyRecord{
 		RequestFingerprint: fingerprint,
 		Ack:                ack,
 	}); saveErr != nil {
 		return nil, fmt.Errorf("%w: persist ack: %v", ErrUnknownState, saveErr)
 	}
 	return &ack, err
+}
+
+// replayAck 把已落盘的记录还原成当初的结论：
+//   - 同 ID 不同载荷 → ErrDuplicateOrder（绝不发第二笔）；
+//   - 只有占位没有回执 → ErrUnknownState（发出途中崩溃，禁止重发）；
+//   - 否则返回原 ack + IdempotentReplay，并还原当初的错误（被拒的单重放仍是拒单）。
+func replayAck(req OrderRequest, fingerprint string, rec IdempotencyRecord) (*OrderAck, error) {
+	if rec.RequestFingerprint != fingerprint {
+		return nil, fmt.Errorf("%w: client_order_id %q was used with a different payload", ErrDuplicateOrder, req.ClientOrderID)
+	}
+	if rec.Ack.Status == "" {
+		return nil, fmt.Errorf("%w: client_order_id %q has no acknowledgement", ErrUnknownState, req.ClientOrderID)
+	}
+	ack := rec.Ack
+	ack.IdempotentReplay = true
+	if err := ackTerminalError(ack); err != nil {
+		return &ack, err
+	}
+	return &ack, nil
 }
 
 // ackTerminalError 把已落盘的回执还原成当初的契约错误。
@@ -697,7 +699,8 @@ func (m *Mock) stateKey(clientOrderID string) string {
 	return orderKey(m.accountID, clientOrderID)
 }
 
-// MemoryAckStore 是 AckStore 的进程内实现（X6a 开发态；跨重启持久化见 R2）。
+// MemoryAckStore 是 AckStore 的进程内实现（开发 / 测试用；**Durable=false**，
+// 因此进不了 XTPTrader 的装配闸）。生产用 internal/ackstore 的 PgStore。
 type MemoryAckStore struct {
 	mu      sync.Mutex
 	records map[string]IdempotencyRecord
@@ -719,13 +722,42 @@ func (s *MemoryAckStore) Load(ctx context.Context, accountID, clientOrderID stri
 	return rec, ok, nil
 }
 
-// Save 见 AckStore。
-func (s *MemoryAckStore) Save(ctx context.Context, accountID, clientOrderID string, rec IdempotencyRecord) error {
+// Reserve 见 AckStore：「查未命中 + 写占位」在同一临界区内完成。
+func (s *MemoryAckStore) Reserve(ctx context.Context, accountID, clientOrderID, fingerprint string) (IdempotencyRecord, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return IdempotencyRecord{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := orderKey(accountID, clientOrderID)
+	if rec, ok := s.records[key]; ok {
+		return rec, false, nil
+	}
+	rec := IdempotencyRecord{
+		RequestFingerprint: fingerprint,
+		Ack:                OrderAck{ClientOrderID: clientOrderID},
+	}
+	s.records[key] = rec
+	return rec, true, nil
+}
+
+// SaveAck 见 AckStore：没有占位就报错，绝不静默插入。
+func (s *MemoryAckStore) SaveAck(ctx context.Context, accountID, clientOrderID string, rec IdempotencyRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.records[orderKey(accountID, clientOrderID)] = rec
+	key := orderKey(accountID, clientOrderID)
+	existing, ok := s.records[key]
+	if !ok {
+		return fmt.Errorf("ack store: no reservation for account %q client order %q", accountID, clientOrderID)
+	}
+	// 指纹属于占位，回执写入不得改写它（否则「同 ID 不同载荷」的判据会被洗掉）。
+	rec.RequestFingerprint = existing.RequestFingerprint
+	s.records[key] = rec
 	return nil
 }
+
+// Durable 见 AckStore：内存不跨重启。
+func (s *MemoryAckStore) Durable() bool { return false }
