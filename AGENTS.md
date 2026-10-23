@@ -6,9 +6,9 @@
 
 交易通道网关：`XTPTrader` / `MockTrader` = 同一 port 的两个实现。**落地前必须先有对账方案**。
 
-**状态**：已启动（2026-10-23 施工 ①）——X6a 的四个 port + 内存 `Mock` 已落 `internal/gateway`；X6b/X6c/X6d 未做
+**状态**：已启动（2026-10-23 施工 ②）——X6a 四 port + 内存 `Mock` 已落 `internal/gateway`；X6b 对账纯函数（快照口径 + 差异注入验收）已落 `internal/reconcile`；X6c 装配闸 + fail-closed 骨架已落；X6c 全量适配器（SDK）与 X6d 未做
 
-**今天的实现**（本仓，2026-10-23）：`internal/gateway` 的 `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` 四个 port、DTO、12 个契约哨兵、`Mock`（`ClientOrderID` 幂等 + 写前日志 + `unknown_state`）、`MemoryAckStore`。**未接 core、未接 PG、无 XTP**；细节见 `docs/ARCHITECTURE.md` §9.8。
+**今天的实现**（本仓，2026-10-23）：`internal/gateway` 的 `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` 四个 port、DTO、12 个契约哨兵、`Mock`（`ClientOrderID` 幂等 + 写前日志 + `unknown_state`）、`MemoryAckStore`、`XTPTrader`（fail-closed 骨架：构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一即拒绝，已装配后所有方法恒 `channel_down`，零 fake success）；`internal/reconcile` 的快照口径对账纯函数。**未接 core、未接 PG、无 XTP SDK 链路**；细节见 `docs/ARCHITECTURE.md` §9.8。
 
 **迁出前的老实现**（core，待切读后退役）：`core:pkg/live`（`MockTrader` / order store / paper trading）+ `core:pkg/live/broker/xtp`（XTP 骨架）。本仓只搬**通道适配**，运行域留 core。
 

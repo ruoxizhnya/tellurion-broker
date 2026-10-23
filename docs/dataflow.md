@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-23
-verified-by: X6a 落地 + 自审（重放还原结论 / 清仓单区分轮次）
+verified-by: X6b 对账纯函数 + X6c 装配闸落地（QT-45 施工 ②）
 ---
 
 # Dataflow — tellurion-broker
@@ -49,8 +49,8 @@ core（订单意图 → RiskPolicy.CheckOrder 已裁决）
 11. `CancelOrder(CancelRequest{ClientOrderID, …})`：已撤再撤 → 同终态 + `nil`；已成交 → `order_not_cancelable`；超时 → `unknown_state`（走查单，不重发撤单）。
 
 ### 对账（日终）
-12. `QuerySettlement(accountID, asOf)` 取**账户快照**（现金 / 持仓 / 费用）→ 与 core 本地快照 `Reconcile` → 差异进 `risk` 的对账留痕。
-13. 生产装配今天是**自检形态**：local 与 broker 用同一个视图，差异恒为零；验收必须另跑「人为注入差异」的腿。
+12. `QuerySettlement(accountID, asOf)` 取**账户快照**（现金 / 持仓 / 费用）→ 与 core 本地快照 `Reconcile` → 差异进 `risk` 的对账留痕。`Reconcile` 已落 `internal/reconcile`（纯函数，快照口径，F6；差异注入验收在册）——差异**分类与严重度判定**在本仓，**留痕与告警**归 risk（X3，未接）。
+13. 生产装配今天（core 侧）仍是**自检形态**：local 与 broker 用同一个视图，差异恒为零；真实 broker 侧 `QuerySettlement` 归 X6c 全量——届时本仓的注入差异验收腿是它的验收样板。
 
 ### 熔断与紧急清仓
 14. `HealthCheck` 失败 → `channel_down` → 熔断：停止下单 + 告警；恢复需显式重连，不自动重试。
@@ -68,7 +68,7 @@ core（订单意图 → RiskPolicy.CheckOrder 已裁决）
 | 幂等映射丢 / 不可用 | 重启后重复下单 | 持久映射；不可用 → `idempotency_store_unavailable`，**不发送** |
 | 柜台断连 | 单发不出去 | `channel_down` 熔断 + 告警，不静默重试 |
 | 未实现能力返回成功形状 | kill-switch 显示「已清仓」而没卖 | 未实现 → `not_supported`；`Sold` 必须有成交依据 |
-| 对账跑成「自己对自己」 | 差异恒零，假绿 | 真实 broker 侧 `QuerySettlement` + 人为注入差异的验收腿 |
+| 对账跑成「自己对自己」 | 差异恒零，假绿 | 真实 broker 侧 `QuerySettlement` + 人为注入差异的验收腿（本仓 `internal/reconcile` 已按此口径建测试） |
 | 申报规则只在一个实现里 | Mock 放行、实盘被拒 | 规则归通道侧纯函数，两实现共用（R5） |
 | 归一化漏字段 | 上游拿到券商私有字段 | 契约禁 XTP 字段；适配器内消化 |
 | 密钥进库 / 进代码 / 进日志 | 泄露 | 环境变量 / 密钥管理；`Config` 脱敏；提交前扫描 |
@@ -78,7 +78,7 @@ core（订单意图 → RiskPolicy.CheckOrder 已裁决）
 1. 同一 `(AccountID, ClientOrderID)` 不会产生两笔柜台订单；同 ID 不同载荷直接 `duplicate_order`。
 2. 超时一定返回 `ErrUnknownState`（不是 generic error，也不是 `ErrOrderRejected`）；`unknown` 是**未决**，不是拒绝。
 3. 对外 DTO 不含任何券商特有字段（`BusinessType` 等留在适配器）。
-4. 没有对账方案 / 幂等映射 / 健康检查时，`XTPTrader` 不可被装配（构造期返回 error）。
+4. 没有对账方案 / 幂等映射 / 健康检查时，`XTPTrader` 不可被装配（构造期返回 error）。**已由代码强制**：`NewXTPTrader` 缺任一依赖 → `ErrAssemblyIncomplete`（构造路径哨兵，非 wire code），测试钉住。
 5. `EmergencyFlatten` 的每个 `Sold` 都能指到一笔真实提交并确认的订单；未实现返回 `not_supported`。
 6. 对账输入是 `QuerySettlement` 快照；`QueryFills` 只用于审计，不参与对账判定。
 7. 网关不 import 风控裁决；风控拒绝不进网关（`exec.order_rejected` 在调用方侧）。

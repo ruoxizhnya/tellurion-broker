@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-23
-verified-by: X6a 落地（port + Mock + 幂等）+ 文档同步
+verified-by: X6b 对账纯函数 + X6c 装配闸落地 + 文档同步（QT-45 施工 ②）
 ---
 
 # 架构 — tellurion-broker
@@ -67,8 +67,8 @@ contracts（BrokerGateway / OrderRequest / Fill）+ kit（logging/http）
 | 阶段 | 内容 | 前置 |
 |---|---|---|
 | X6a | port 定义 + MockTrader 🔶（2026-10-23：port / DTO / 内存 Mock / `ClientOrderID` 幂等已落 `internal/gateway`；**未接 core**） | 无 |
-| X6b | 对账口径定稿 | risk 的 `QueryFills` 契约 |
-| X6c | XTPTrader | 对账 + 幂等 + 熔断三项就位 |
+| X6b | 对账口径定稿 🔶（2026-10-23 施工 ②：快照口径纯函数 + 差异注入验收已落 `internal/reconcile`；真实 broker 侧 `QuerySettlement` 归 X6c 全量） | risk 的 `QueryFills` 契约 |
+| X6c | XTPTrader 🔶（2026-10-23 施工 ②：装配闸 + fail-closed 骨架已落 `internal/gateway/xtp.go`——构造期强制注入幂等 / 对账 / 健康，缺一 error，已装配后全方法 `channel_down`；SDK 从零实现未做） | 对账 + 幂等 + 熔断三项就位 |
 | X6d | 独立进程（可选） | 多账户 / 多策略共用通道 |
 
 ## 9. 接口对表（M8 前置 · ✅ 2026-10-22）
@@ -215,9 +215,9 @@ type HealthChecker interface {
 | R7 | **kill-switch 的授权与审计** | `EmergencyFlatten` 绕过 T+1；XTP 侧无真实成交；谁有权触发未定 | 独立 `KillSwitch` port；调用方必须带运维身份与 reason；逐标的落审计（`bypassed_t1`）；与 QT-50 ④ 的鉴权矩阵合流 |
 | R8 | **密钥脱敏** | `Config.Password` `json:"-"` 但 `yaml:"password"`（`pkg/live/broker/xtp/xtp.go:119`） | 配置结构加 `String()`/日志脱敏；禁止把 `Config` 整体打进日志；密钥只从环境/密钥管理注入；加一条「日志里不出现 password」的测试 |
 
-### 9.8 实现现状（2026-10-23，施工 ①）
+### 9.8 实现现状（2026-10-23，施工 ① + ②）
 
-**落地包**：`internal/gateway`（本仓唯一实现包，只用 stdlib，`go.mod` 零 require）。
+**落地包**：`internal/gateway` + `internal/reconcile`（本仓仅有的两个实现包，只用 stdlib，`go.mod` 零 require）。
 
 | 文件 | 内容 |
 |---|---|
@@ -225,6 +225,8 @@ type HealthChecker interface {
 | `errors.go` | 12 个契约哨兵（与 `api-schema.md` §2 一一对应） |
 | `ports.go` | `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` / `AckStore`（+ `IdempotencyRecord`） |
 | `mock.go` | `Mock` 实现四个 port + `MemoryAckStore`（仅开发/测试用） |
+| `xtp.go`（施工 ②） | `XTPTrader` fail-closed 骨架 + 装配闸：`NewXTPTrader` 构造期强制注入 `AckStore` / `SettlementQuerier` / `HealthChecker`（缺一 → `ErrAssemblyIncomplete`，构造路径哨兵、非 wire code）；已装配后**所有**方法（含 `EmergencyFlatten`）恒 `ErrChannelDown`；`XTPConfig` 无密钥字段（R8） |
+| `reconcile/reconcile.go`（施工 ②） | 快照口径对账纯函数：两侧共用 `AccountSnapshot`（F6），七类差异 × 三级严重度，容差沿用 core 迁出口径（现金 0.01 / 数量 0 / 市值 0.5% 仅数量相符时比 / 费用 0.01 / 时间漂移 60s），nil / 账户不符 / 重复标的 fail-loud，固定发射顺序，零差异返回空非 nil |
 
 **能跑 vs 只是接口就位**
 
@@ -246,8 +248,9 @@ type HealthChecker interface {
 | **清仓单 ID 区分轮次**（持仓代次参与 ID）→ 不重放上一轮回执伪造清仓成功 | ✅ 有测试 |
 | `HealthCheck` / `Connect` / `Disconnect` | ✅ 有测试 |
 | **持久**幂等映射（跨重启） | ❌ 只有 `MemoryAckStore`；PG 落点未接（R2） |
-| `XTPTrader` | ❌ 未做（X6c） |
-| 对账口径定稿 + 真实 broker 侧 | ❌ 未做（X6b / R3） |
+| `XTPTrader` **装配闸**（构造期缺幂等 / 对账 / 健康任一 → error，即「无幂等键不接真钱」护栏） | ✅ 有测试（X6c 施工 ②；`ErrAssemblyIncomplete` 含缺哪个依赖的说明） |
+| `XTPTrader` **全方法 fail-closed**（已装配后恒 `channel_down`，零 fake success） | ✅ 有测试；SDK 真实实现 ❌（X6c 全量：下单/撤单/查单/回报/心跳/重连/限流） |
+| 对账纯函数（快照口径 + **差异注入验收**九腿） | ✅ 有测试（X6b 施工 ②）；真实 broker 侧 `QuerySettlement` ❌（归 X6c）；对账留痕进 risk 未接（X3） |
 | core 消费方切换（旧 `LiveTrader` / `Broker` 退役） | ❌ 未做（R4） |
 | 申报数量规则两实现共用同一份纯函数 | ❌ 未做（R5；Mock 内联了一份） |
 
@@ -259,4 +262,4 @@ type HealthChecker interface {
 4. `EmergencyFlatten` 的 `Sold` 必须对应真实提交并确认的订单，其余一律进 `Skipped`；清仓单 ID 带**持仓代次**，重放来的单**不算**本次清仓的凭据。
 5. `ClientOrderID` 由调用方生成，网关**不改写、不派生**（`EmergencyFlatten` 是唯一例外：它内部自造 ID，用 `flatten:<symbol>:<代次>:<qty>` 区分轮次）。
 
-**自检结论**：X6a 的 port / DTO / 错误语义 / 幂等顺序**已定形可用**；本仓**未接 core、未接 PG、XTP 未动**——真钱通道仍被"对账 + 持久幂等 + 熔断"三道闸挡在 X6c 之外。
+**自检结论**：X6a 的 port / DTO / 错误语义 / 幂等顺序**已定形可用**；X6b 的口径已定稿为纯函数（差异注入验收在册）；X6c 的装配闸已把「无幂等键不接真钱」变成构造期可机械拒绝的护栏。本仓仍**未接 core、未接 PG、无 XTP SDK 链路**——真钱通道现在被「装配闸（已落）+ 全量适配器（未做）+ 持久幂等映射（R2）」挡在 X6c 全量之外。
