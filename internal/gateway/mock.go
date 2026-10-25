@@ -349,6 +349,17 @@ func (m *Mock) CancelOrder(ctx context.Context, req CancelRequest) (*OrderState,
 
 	state, ok := m.orders[m.stateKey(req.ClientOrderID)]
 	if !ok {
+		// 本地没有状态 ≠ 从未发送。幂等映射里有记录，就说明这一单可能已经发出去了
+		// （另一个进程占的位，或本进程重启后本地状态丢了）——此时报 order_not_found
+		// 等于伪造「网关能证明从未发送」这个判据，调用方会据此换新 ID 重发，
+		// 柜台就是两笔。与 QueryOrder 同一口径（docs/api-schema.md §2、dataflow.md §4-1）。
+		if m.store != nil {
+			if _, found, err := m.store.Load(ctx, m.accountID, req.ClientOrderID); err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrChannelDown, err)
+			} else if found {
+				return nil, fmt.Errorf("%w: client_order_id %q may already be at the counter; query the order, do not retry the cancel", ErrUnknownState, req.ClientOrderID)
+			}
+		}
 		return nil, fmt.Errorf("%w: %s", ErrOrderNotFound, req.ClientOrderID)
 	}
 	switch state.Status {

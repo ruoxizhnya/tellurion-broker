@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-23
-verified-by: R2 裁决 + 持久幂等映射落地（ADR 0002 / X6c 幂等持久化）
+last-verified: 2026-10-25
+verified-by: G7（施工 ⑤）撤单 `order_not_found` 判据补进 §3；此前 R2 裁决 + 持久幂等映射落地（ADR 0002 / X6c 幂等持久化）
 ---
 
 # API Schema — tellurion-broker
@@ -98,6 +98,10 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 - **重放还原当初的结论**：当初被柜台拒过的单，重放时仍返回**同一个 error**（`order_rejected` / `insufficient_buying_power`）与那份 ack——被拒的单重放不能变成"受理成功"。
 - 幂等映射必须**持久**（跨重启、跨进程）：不可用 → `idempotency_store_unavailable`，**不发送**。落点已裁为 `broker.order_acks`（[ADR 0002](adr/0002-幂等映射落-broker-写前日志.md)、[`db-schema.md`](db-schema.md) §1.1）；`AckStore.Durable()` 让 XTP 装配闸拒绝内存实现。
 - `CancelOrder` 幂等：已撤再撤 → 同终态 `OrderState` + `nil`；已成交 → `order_not_cancelable`。
+- **`CancelOrder` 的 `order_not_found` 判据与 `PlaceOrder` 同一条**：本地没有订单状态**不等于**从未发送——
+  幂等映射里有占位（另一进程发的 / 本进程重启后本地状态丢了）时结论是 `unknown_state`（走查单，**不重发撤单**），
+  映射里也没有才允许 `order_not_found`。没有注入幂等映射（`Store=nil`）时本实例**发不出任何单**
+  （`PlaceOrder` 恒 `idempotency_store_unavailable`），那种装配下的 `order_not_found` 才是可证的。误报 `not_found` 会让调用方按「没发过」换新 `ClientOrderID` 重发 → 柜台两笔。
 - `QueryOrder` / 查询面只读，天然幂等。
 - 重试只允许在**确定未送达**时进行（`rate_limited` / 显式失败）；`unknown_state` 必须先 `QueryOrder`。
 - `EmergencyFlatten` 重入不重复卖：已无持仓 → 空 `Sold` + `nil`；每个 `Sold` 必须对应真实提交并确认的订单，未确认进 `Skipped`。

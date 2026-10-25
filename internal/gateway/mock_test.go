@@ -493,6 +493,27 @@ func TestCancelOrder(t *testing.T) {
 	}
 }
 
+// 映射里有占位、本地没有状态（另一个进程占的位，或本进程重启后本地状态丢了）时，
+// 撤单**不许**报 order_not_found：那个 code 的判据是「网关能证明从未发送过该 ID」
+// （api-schema.md §2、dataflow.md §4-1）。误报 not_found 会让调用方按「没发过」
+// 处理——换个新 ClientOrderID 重发，柜台就是两笔。
+func TestCancelOrderDoesNotClaimNeverSentForAReservedOrder(t *testing.T) {
+	m, store, _ := newMock(t, MockOptions{Cash: 5000})
+	ctx := context.Background()
+
+	if _, _, err := store.Reserve(ctx, "ACC-1", "c-9", "fp"); err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if _, err := m.CancelOrder(ctx, CancelRequest{ClientOrderID: "c-9"}); !errors.Is(err, ErrUnknownState) {
+		t.Fatalf("err = %v, want ErrUnknownState", err)
+	}
+
+	// 映射里也没有 → 才允许 not_found（此时「从未发送」是真）。
+	if _, err := m.CancelOrder(ctx, CancelRequest{ClientOrderID: "never-seen"}); !errors.Is(err, ErrOrderNotFound) {
+		t.Fatalf("err = %v, want ErrOrderNotFound", err)
+	}
+}
+
 func TestQueryOrderUnknownAndPending(t *testing.T) {
 	m, store, _ := newMock(t, MockOptions{Cash: 5000})
 
