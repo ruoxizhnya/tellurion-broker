@@ -39,6 +39,8 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 > （六条是 PG 集成腿：本机 `127.0.0.1:5432` 无监听、Docker 引擎未起 ⇒ 无 DSN 按设计 skip；带 DSN 强跑 6 条 fail-loud）。
 > 破坏腿把新分支哨兵换成**同样合法的** `ErrOrderNotFound` → `TEST_EXIT=1` 且红在该断言；逐字节还原 `sha256sum -c` → `OK`，
 > 重跑绿。**无 race**（本机 `CGO_ENABLED=0`，`-race` 跑不了，如实登记）。
+> 两笔提交落地后在**干净 checkout**（`git worktree add --detach` + 用完 `remove --force`）复取一遍：`gofmt -l .` 空输出、
+> build / vet / test 全 `EXIT=0`，同样 **50 / 0 / 6**，新腿在列——工作树的绿不等于推得出去的绿。
 > ④ **两条新待裁**（登记进 `ARCHITECTURE.md` §9.7，本轮不擅自改行为）：**R9** Mock 与真实柜台的三处行为差异
 > （T+1 不进 Mock `mock.go:295`；卖出超可用量放行 `mock.go:300-305`，`PlaceOrder` 只校申报单位 `:663`；费用恒零）——
 > 收紧属契约行为变更，要动 `api-schema.md` §2 并可能一条 ADR；**R10** 映射读失败被报成 `channel_down`

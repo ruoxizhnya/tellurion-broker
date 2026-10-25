@@ -128,6 +128,9 @@ X6d（独立进程）另有自己的触发条件，见 ADR 0002 代价 4——�
     Docker 引擎未起；带 `BROKER_TEST_DSN` 强跑则 6 条 fail-loud（`connectex: ... actively refused it`），不是假绿。
   - 破坏腿：把新分支的哨兵换成**同样合法的** `ErrOrderNotFound` → `TEST_EXIT=1`，红在
     `mock_test.go` 那条 `c-9` 断言上；逐字节还原后 `sha256sum -c` → `OK`，`go test ./internal/gateway` 绿。
+  - **两笔提交落地后在干净 checkout 里复取结论**（`git worktree add --detach <tmp> HEAD`，用完 `worktree remove --force`）：
+    `gofmt -l .` 空输出 `EXIT=0`、`BUILD_EXIT=0`、`VET_EXIT=0`、`TEST_EXIT=0`，同样 **50 passed / 0 failed / 6 skipped**，
+    且新腿在列。工作树的绿不等于推得出去的绿——这条是本仓吃过亏的（core AGENTS §6 规范 2 的实测代价）。
 - **文档同步**：`api-schema.md` §3 补撤单判据；`ARCHITECTURE.md` §9.4 表里 `CancelOrder` 行的「超时 →
   `unknown_state`」从此有了一条**本地无状态**的腿（§9.8 现状矩阵同步改一行）、§9.7 新增 **R9**（Mock 与
   柜台的三处行为差异）与 **R10**（映射读失败的哨兵）两条待裁；§1 定位补一句 X6c 的阻塞状态；
