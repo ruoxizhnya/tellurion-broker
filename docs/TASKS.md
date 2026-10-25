@@ -11,6 +11,8 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 > 每张单六字段（① 目标 ② 上下文 ③ 要求 ④ 约束与非目标 ⑤ 验收 ⑥ 边界），判据见 `tellurion:AGENTS.md` §8.5。
 > 完成即标 ✅（附日期）并移入 `docs/archive/TASKS-YYYY-MM-DD-archived.md`；本文件只留未完成项。
 
+> **第三轮裁决指针（2026-10-25）**：⑨ `broker.order_acks` 保留期 = **90 天**，只删 `ack IS NOT NULL`，先加 `(updated_at) WHERE ack IS NOT NULL` 部分索引，单批 ≤ 5000 行；90 天登记为暂定假设（柜台可查窗口未知）。㉒ **R10 现在修**（`internal/gateway/mock.go:358/415` 的映射读失败从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`，两处同口径 + 各一条用例）；**R9 暂缓到 X6c**，三条差异写进 `docs/x6c-xtp-readiness.md` §8。⑦ XTP 维持 ⛔。正文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` §五。
+
 ---
 
 ## 一、本仓任务
