@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-24
-verified-by: R2 裁决 + 持久幂等映射落地 + R5 申报数量纯函数 + 文档同步（QT-45 施工 ④）
+last-verified: 2026-10-25
+verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤单判据自审补正；此前 R2 裁决 + 持久幂等映射落地 + R5 申报数量纯函数（施工 ④）+ 文档同步
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -20,6 +20,36 @@ verified-by: R2 裁决 + 持久幂等映射落地 + R5 申报数量纯函数 + �
 ### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] 🔶
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
+>
+> **施工记录（2026-10-25，施工 ⑤ = 派工 G7）**：**本组不具备开工条件，交付的是决策材料**——
+> 新建 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md)（四处取证 / 九项不可猜的柜台事实 / 剩余范围哪一半与 SDK 无关 /
+> P1~P5 开工前置 / 三个选项与推荐 / 可判定的触发条件）。核对结论：**X6c 判 ⛔ 阻塞，不是 🔶 待做**。
+> ① **前提核实（四处实测，都不在仓内）**：本仓 `find` 只有 `internal/gateway/xtp.go` + 其测试，无头文件 / 无 `.so`/`.dll`；
+> core 侧 `git grep -l 'import "C"'` 零命中、注释里承诺的 `internal/cgo/xtp/` 目录不存在；本机 `go env CGO_ENABLED` = `0`
+> 且 PATH 里没有 gcc（`go env CC` 写的是 `gcc`，但命令找不到）——`import "C"` 的包今天在这台机器上编不起来；
+> CI 只 checkout 本仓、`ubuntu-latest`、四步 gofmt/build/vet/test，没有 C 工具链也没有柜台网络。
+> ② **本波唯一一条代码改动 = 一条与 SDK 无关的真缺口**（自审发现，见 §7 的完整取证）：`Mock.CancelOrder` 在本地无订单状态时
+> 直接报 `order_not_found`，而该 code 的判据是「网关**能证明**从未发送过该 ID」（`api-schema.md` §2 / `dataflow.md` §4-1）——
+> 幂等映射里有占位（另一进程发的 / 本进程重启后本地状态丢了）时它证明不了，误报会让调用方换新 `ClientOrderID` 重发 ⇒ 柜台两笔。
+> 改为先读映射（同一判重域）→ 有记录 = `unknown_state`，映射也没有才 `order_not_found`（哨兵取自 §9.4 已冻结的 `CancelOrder`
+> 错误集，**不新增契约面**）。
+> ③ **测试先行 + 破坏验证（真实退出码，未截断）**：新腿 `TestCancelOrderDoesNotClaimNeverSentForAReservedOrder`
+> 先对**未修**代码红（`TEST_EXIT=1`：`err = broker: order not found: c-9, want ErrUnknownState`）；修后
+> `BUILD_EXIT=0`、`VET_EXIT=0`、`gofmt -l .` 空输出、`TEST_EXIT=0`，**50 passed / 0 failed / 6 skipped**
+> （六条是 PG 集成腿：本机 `127.0.0.1:5432` 无监听、Docker 引擎未起 ⇒ 无 DSN 按设计 skip；带 DSN 强跑 6 条 fail-loud）。
+> 破坏腿把新分支哨兵换成**同样合法的** `ErrOrderNotFound` → `TEST_EXIT=1` 且红在该断言；逐字节还原 `sha256sum -c` → `OK`，
+> 重跑绿。**无 race**（本机 `CGO_ENABLED=0`，`-race` 跑不了，如实登记）。
+> ④ **两条新待裁**（登记进 `ARCHITECTURE.md` §9.7，本轮不擅自改行为）：**R9** Mock 与真实柜台的三处行为差异
+> （T+1 不进 Mock `mock.go:295`；卖出超可用量放行 `mock.go:300-305`，`PlaceOrder` 只校申报单位 `:663`；费用恒零）——
+> 收紧属契约行为变更，要动 `api-schema.md` §2 并可能一条 ADR；**R10** 映射读失败被报成 `channel_down`
+> （`QueryOrder` `mock.go:415`、本轮 `CancelOrder` `:358` 同口径），准确哨兵应是 `idempotency_store_unavailable`，
+> 属诊断质量问题（现方向处置更保守，不会造成发送）。
+> ⑤ **文档同步**：`api-schema.md` §3（含本文头部 last-verified）、`ARCHITECTURE.md`（§1 定位 / §9.4 `CancelOrder`
+> 行补这条腿 / §9.7 R6 指向本文 + 新增 R9+R10 / §9.8 矩阵与自检结论 / frontmatter）、
+> `docs/README.md` §1/§2 导航、`AGENTS.md` §1 状态。
+> **未落项（如实，不写成已完成）**：X6c 全量适配器仍 ⛔（P1~P5 任一不满足即不动代码，触发条件见该文 §6）；
+> R9 / R10 待裁；`broker.order_acks` 保留期未定（它要的是「柜台可查窗口」这个**事实**，不是代码）；
+> 对账留痕进 risk（X3）未接；core 旧 `LiveTrader` / `Broker` 退役（R4，跨仓腿）；**PG 集成腿本轮未跑**（服务未起）。
 >
 > **施工记录（2026-10-24，施工 ④）**：**R5 申报数量纯函数**落地，`go build/vet/test -count=1` 全绿（新增 `internal/gateway/lot`；用例覆盖 0 手 / 最小单位取整 / 超可用数量 / 涨跌停 / 越界价 / 非法入参）——
 > ① `Size(Input)`：目标权重 × 资金或可用数量 ÷ 价格，**向下取整**到申报单位（`LotSize`，0 = 100）；输出股数 / 手数与拒单原因码（`zero_quantity` / `insufficient_capital` / `exceeds_available_quantity` / `price_above_limit_up` / `price_below_limit_down` / `invalid_input`）。**不缩量、不抬量**：超可用 / 超资金 / 不足一手一律拒单，把定仓错误暴露在调用方；被拒结果不带数量（防止"顺手"把拒单当订单发出去）。
@@ -74,7 +104,7 @@ verified-by: R2 裁决 + 持久幂等映射落地 + R5 申报数量纯函数 + �
 |---|---|---|---|
 | X6a | `BrokerGateway` port + `MockTrader`（`ClientOrderID` 幂等 / 超时语义跑通）🔶（施工 ① 已落 `internal/gateway`，未接 core） | `QT-45` | 本仓立项 + M8 对表 ✅ |
 | X6b | 对账口径定稿（**账户快照** `QuerySettlement` + 真实 broker 侧 + 差异注入验收）🔶（施工 ② 口径纯函数 + 差异注入验收已落 `internal/reconcile`；真实 broker 侧归 X6c 全量） | `QT-45` | X6a |
-| X6c | `XTPTrader` 适配器（从零实现；装配前置：对账 + 幂等 + 熔断，缺一构造期拒绝）🔶（施工 ② 装配闸 + fail-closed 骨架；施工 ③ 持久幂等 `broker.order_acks` + `Durable` 闸；**SDK 从零实现未做**） | `QT-45` | X6b |
+| X6c | `XTPTrader` 适配器（从零实现；装配前置：对账 + 幂等 + 熔断，缺一构造期拒绝）**⛔ 阻塞（G7，2026-10-25）**——装配闸 + fail-closed 骨架 + 持久幂等映射已落，全量实现缺 P1~P5 五项外部条件（SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗），本仓与 core 与本机与 CI **四处都没有 SDK**；取证、剩余范围切分与触发条件见 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) | `QT-45` | X6b ＋ **P1+P2 到手且当天有 P5 时间窗** |
 | X6d | 独立进程（回环监听 + 健康检查）——**2026-10-23 裁决：暂缓**（触发条件未到；见 ADR 0002 代价 4 与 `ARCHITECTURE.md` §8） | `QT-45` | 多账户共用通道 / 通道级高可用 |
 
 ## 二、跨仓指针（不在本仓，勿双写）

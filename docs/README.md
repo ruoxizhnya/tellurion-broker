@@ -21,6 +21,7 @@ verified-by: M8 接口对表（QT-45 前置 ②）
 | 加 / 改接口 | [`api-schema.md`](api-schema.md) |
 | 改数据流向或顺序 | [`dataflow.md`](dataflow.md) |
 | 想知道"为什么这样设计" | [`adr/`](adr/README.md) |
+| 想知道"真钱通道（X6c）为什么还不开工 / 开工要什么" | [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md)（G7 决策材料） |
 | 要做删档 / 迁移 / 流程变更 | [`odr/`](odr/README.md) |
 | 查历史 | [`archive/`](archive/README.md) |
 
@@ -33,6 +34,7 @@ verified-by: M8 接口对表（QT-45 前置 ②）
 | [`api-schema.md`](api-schema.md) | **对外接口唯一真相源** + 错误码 / 幂等 / 兼容 | 改接口的人 |
 | [`dataflow.md`](dataflow.md) | 数据流向、时序、fail-closed 点、不变量 | 改链路的人 |
 | [`TASKS.md`](TASKS.md) | 可执行任务（六字段） | 每个人 |
+| [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) | **X6c 真钱通道的开工条件与决策材料**（G7）：四处取证 / 九项不可猜的柜台事实 / 剩余范围哪一半与 SDK 无关 / P1~P5 前置 / 三个选项与触发条件 | 议 X6c 之前必读的人 |
 | [`adr/`](adr/README.md) | 架构决策（只增不删） | 提变更的人 |
 | [`odr/`](odr/README.md) | 运行 / 治理决策（删档、审计、迁移、工具） | 做事的人 |
 | [`archive/`](archive/README.md) | 已完成任务与历史文档 | 收尾的人 |
