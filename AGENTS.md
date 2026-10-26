@@ -6,7 +6,7 @@
 
 交易通道网关：`XTPTrader` / `MockTrader` = 同一 port 的两个实现。**落地前必须先有对账方案**。
 
-**状态**：已启动（2026-10-24 施工 ④ ＋ 2026-10-25 施工 ⑤ = G7）——X6a 四 port + 内存 `Mock` 已落 `internal/gateway`；X6b 对账纯函数（快照口径 + 差异注入验收）已落 `internal/reconcile`；X6c 装配闸 + fail-closed 骨架 + **持久幂等映射 `broker.order_acks`**（`internal/ackstore`，ADR 0002）已落；R5 申报数量纯函数（`internal/gateway/lot`）已落并让 Mock 共用；**X6c 全量适配器 ⛔ 阻塞**（G7 判定：本仓 / core / 本机 C 工具链 / CI **四处都没有 SDK**，缺的是开工前置 P1~P5，不是漏做的一步——取证、剩余范围与触发条件见 `docs/x6c-xtp-readiness.md`）；两条新待裁 R9 / R10 已登记；X6d 按 2026-10-23 裁决**暂缓**
+**状态**：已启动（2026-10-24 施工 ④ ＋ 2026-10-25 施工 ⑤ = G7）——X6a 四 port + 内存 `Mock` 已落 `internal/gateway`；X6b 对账纯函数（快照口径 + 差异注入验收）已落 `internal/reconcile`；X6c 装配闸 + fail-closed 骨架 + **持久幂等映射 `broker.order_acks`**（`internal/ackstore`，ADR 0002）已落；R5 申报数量纯函数（`internal/gateway/lot`）已落并让 Mock 共用；**X6c 全量适配器 ⛔ 阻塞**（G7 判定：本仓 / core / 本机 C 工具链 / CI **四处都没有 SDK**，缺的是开工前置 P1~P5，不是漏做的一步——取证、剩余范围与触发条件见 `docs/x6c-xtp-readiness.md`）；两条新待裁 R9 / R10 已登记；**X6d 已由 ADR-036（2026-10-26）取代**——本仓定位为**服务**，G0 已落 `cmd/brokergateway`（`/healthz`、`/version`）+ `Dockerfile` + `deploy/compose.yaml`（`:8091`）；订单 HTTP 面归 `SVC-BROKER-G1`；真实 XTP 仍 ⛔（X6c）
 
 **今天的实现**（本仓，2026-10-24）：`internal/gateway` 的 `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` 四个 port、DTO、12 个契约哨兵、`Mock`（`ClientOrderID` 幂等 + 写前日志 + `unknown_state`）、`MemoryAckStore`、`XTPTrader`（fail-closed 骨架：构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一、或 `Acks.Durable()==false` 即拒绝，已装配后所有方法恒 `channel_down`，零 fake success）；`internal/reconcile` 的快照口径对账纯函数；`internal/ackstore` 的持久幂等映射 `broker.order_acks`（原子 `Reserve` + 回执写回）；`internal/gateway/lot` 的申报数量纯函数（R5，Mock 共用）。**未接 core、无 XTP SDK 链路、未接真实柜台**（PG 只用于幂等映射）；细节见 `docs/ARCHITECTURE.md` §9.8。
 

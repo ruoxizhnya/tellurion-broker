@@ -8,6 +8,7 @@
 
 | 路径 | 内容 |
 |---|---|
+| `cmd/brokergateway/` | 网关服务进程入口（`127.0.0.1:8091`；G0 只暴露 `/healthz` / `/version`，订单 HTTP 面归 G1） |
 | `internal/gateway/` | `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` port + DTO + `Mock`（X6a） |
 | `docs/` | 本仓文档：台账 / 边界 / 决策 / 归档 —— 从这里进：`docs/README.md` |
 | `AGENTS.md` | 本仓入口（构建、边界、禁止、依赖版本） |
@@ -22,6 +23,16 @@ go test ./...
 ```
 
 本仓**单独 checkout 就能跑通**上面三条。需要别的仓源码才过 → 边界错了，不是加 `replace` 能解决的问题。
+
+跑起来（G0 = Mock 网关，只探活/版本）：
+
+```bash
+# 本机直跑（默认 127.0.0.1:8091）
+go run ./cmd/brokergateway
+
+# 或容器（单仓 compose）
+docker compose -f deploy/compose.yaml up --build
+```
 
 ## 边界
 

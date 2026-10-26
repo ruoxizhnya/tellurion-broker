@@ -1,0 +1,21 @@
+# tellurion-broker · 单仓本地运行（ADR-036 G0，Mock）
+# 用法：docker compose -f deploy/compose.yaml up --build
+# G0 只暴露 /healthz 与 /version；订单 HTTP 面归 SVC-BROKER-G1。
+name: tellurion-broker
+
+services:
+  broker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: tellurion-broker:dev
+    command: ["-addr", "0.0.0.0:8091", "-account-id", "mock", "-cash", "100000000"]
+    ports:
+      - "127.0.0.1:8091:8091"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8091/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped

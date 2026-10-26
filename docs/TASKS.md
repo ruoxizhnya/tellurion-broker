@@ -19,6 +19,43 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 
 > **约定变更（2026-10-21）**：原「占位仓不写正式六字段任务单」作废——X 线任务单已展开为本仓正式任务（见下）。M5/M8 开工前置不变；实现仍未开工，开工前仍须过前置两条。
 
+### SVC-BROKER-G0 · 服务就绪门 G0：Mock 服务入口与自有部署（ADR-036）[P0] ✅（2026-10-26）
+
+- **① 目标**：本仓作为交易网关**服务**能在本地独立启动；先暴露健康/版本面，订单 HTTP 面归 G1。
+- **② 上下文**：ADR-036 定本仓为服务并**取代 X6d「独立进程暂缓」**；今天只有 `internal/gateway` 的 port + Mock，无 `cmd/`、无 `Dockerfile` / `deploy/`。
+- **③ 要求**：新增 `cmd/brokergateway`（`/healthz`、`/version`；装配现有 `Mock`，`AckStore` 可 Memory 或 PG）；新增 `Dockerfile`（多阶段、非 root、`curl`、`HEALTHCHECK /healthz`）；新增 `deploy/compose.yaml`（`BROKER_DATABASE_DSN` 可选；端口 `:8091`）；README 写单仓启动命令。
+- **④ 约束与非目标**：不接真实 XTP（X6c 仍 ⛔）；不做风控；不伪造订单成功；不在 G0 暴露下单 API（G1）。
+- **⑤ 验收**：`docker compose -f deploy/compose.yaml config` 通过；单仓启动后 `GET /healthz` 200；`/version` 返回构建信息；无 `replace` / `go.work`。
+- **⑥ 边界**：只改本仓 deployment 与最小服务入口；core 消费由 `SVC-BROKER-G3` 跟踪。
+
+> **施工记录（2026-10-26）**：
+> - **落点**：`cmd/brokergateway/main.go`（默认 `127.0.0.1:8091`、`/healthz`、`/version`，Mock + 内存 `AckStore`；路由用 `healthzPath` / `versionPath` 常量，便于文档 grep 锚定）、`Dockerfile`（多阶段、非 root、`curl`、`HEALTHCHECK curl -fsS http://127.0.0.1:8091/healthz`）、`deploy/compose.yaml`（服务名 `broker`、`:8091`）；README 补 `cmd/` 与直跑 / compose 命令。
+> - **验收（真实输出）**：`docker compose -f deploy/compose.yaml config -q` → exit 0；`git ls-files cmd/` → 含 `cmd/brokergateway/main.go`；`rg -n '"/version"' cmd/brokergateway/main.go` → 1 行（`:46`）；`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全绿（4 个测试包）；`gofmt -l .` 空。
+> - **破坏验证**：`git rm --cached -r cmd` 后 `git ls-files cmd/` = 0 行（红）→ `git reset -- cmd` 逐字节还原 → 1 行（绿），工作区零改动。
+> - **如实登记**：未引 SDK / C 工具链；未改 `pkg/live`（core 侧）；未自造 order intent DTO；compose 未注入 `BROKER_DATABASE_DSN`（G0 用内存 AckStore，接 PG 归 G1）；X6c 仍 ⛔ 永久。
+
+### SVC-BROKER-G1 · 订单 HTTP 契约（ADR-036 G1）[P0] ⛔（2026-10-26 复核：等 A 组 broker DTO）
+
+- **① 目标**：把现有 Go port 的订单/查询/对账能力暴露成版本化 HTTP 面，供 core 远程调用。
+- **② 上下文**：`docs/api-schema.md` 明写今天是「Go port（进程内），不是 HTTP」；ADR-036 把本仓定为服务，G1 必须补 HTTP 形状。
+- **③ 要求**：定义 `/api/broker/orders`（Place/Cancel/Query）、`/accounts/{id}/positions|account|fills`、`/settlement`、`/emergency-flatten`；DTO 与 12 哨兵映射错误码；写侧 service token；幂等键仍 `(AccountID, ClientOrderID)`；更新 `api-schema.md`（从 port 改为 port + HTTP）。
+- **④ 约束与非目标**：不改 Mock 语义；不接真钱；不做本地订单真相；不把风控塞进网关。
+- **⑤ 验收**：core 能通过 HTTP 完成下单/查单/撤单/持仓/对账；12 错误码逐条可复现；`api-schema.md` 与实现一致。
+- **⑥ 边界**：本仓只保证网关面；core 侧调用与旧实现退役由 `SVC-BROKER-G3` / `SVC-CORE-BROKER-RETIRE` 跟踪。
+
+> **⛔ 开工前置复核（2026-10-26，未开工）**：等 A 组 broker DTO（contracts 侧）与 `go.mod` 引 contracts / kit；今天 `go.mod` 两者皆无。本轮未自造 order intent DTO。
+
+### SVC-BROKER-G3 · core 切读与旧 LiveTrader 退役（ADR-036 G3）[P0] ⛔（2026-10-26 复核：无消费面）
+
+- **① 目标**：core 的交易通道调用走本仓；core `pkg/live` / `pkg/live/broker` 旧实现退役（R4 关闭）。
+- **② 上下文**：core 仍跑 `MockTrader` / `LiveTrader`；本仓 X6c 全量适配器仍被 SDK 阻塞，但 Mock 路径可先切。
+- **③ 要求**：core 通过 G1 HTTP 面调用本仓 Mock；按「第二实现 → 对拍 → 切读 → 停写」推进；切读后删 core `pkg/live` / `pkg/live/broker` 的通道适配；保留运行域（订单/持仓/结算）在 core；真实 XTP 另立 ADR。
+- **④ 约束与非目标**：不在 X6c 前接真钱；不把订单真相搬进本仓；不改 T+1/撮合语义。
+- **⑤ 验收**：core 侧旧通道适配零调用；同批回放的订单/成交/持仓与旧实现一致；`R4` 关闭；X6c 仍如实标 ⛔。
+- **⑥ 边界**：本仓只保证网关；core 代码删除由 `SVC-CORE-BROKER-RETIRE` 跟踪。
+
+> **⛔ 开工前置复核（2026-10-26，未开工）**：等 C 组 QT-51 合入（core 无执行 port 则无消费面）+ B 组 `SVC-CORE-BROKER-RETIRE` 立单；本仓 G1 HTTP 面未落，G3 无第二条实现可对拍。X6c 维持 ⛔ 永久（全仓无 SDK / C 工具链）。
+
 ### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] 🔶
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
@@ -68,7 +105,7 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 > ③ **持久实现**：`internal/ackstore`（`ddl.go` + `pg.go`），`broker.order_acks`：主键 `(account_id, client_order_id)`、载荷指纹、`ack` 可为 NULL（占位未回执）、时间戳；`ackstore.Migrate` 启动时执行（幂等、无版本表）。新增 `pgx v5.7.3` 依赖（AGENTS §4 已登记）。
 > ④ **装配闸收紧**：`NewXTPTrader` 现在要求 `Acks.Durable()==true`——`MemoryAckStore` 接真钱在构造期被拒，「无幂等键不接真钱」不再靠装配方记得。
 > ⑤ **破坏验证**：拆开内存 `Reserve` 的临界区 → 并发腿 16 笔成交 / 32 winners（红）；逐字节还原 → 绿。PG 的 `ON CONFLICT DO NOTHING` 改成 `DO UPDATE` → 16 winners（红）；还原 → 6/6 绿。
-> ⑥ **X6d 裁决：暂缓**（2026-10-23）——仓内文档明写它是触发式选项（多账户共用通道 / 通道级高可用），当前单账户单实例，触发条件未到；本轮不建 `cmd/brokergateway`，文档口径不变。
+> ⑥ ~~**X6d 裁决：暂缓**（2026-10-23）~~ → **已被 ADR-036（2026-10-26）取代**：本仓定位为服务，先落 `cmd/brokergateway` 的 Mock 健康/版本面（`SVC-BROKER-G0`），订单 HTTP 面归 `SVC-BROKER-G1`；真实 XTP 仍受 X6c 阻塞，真钱形态另立 ADR。
 > **仍是 🔶**：X6c 全量适配器（下单 / 撤单 / 查单 / 回报 / 心跳 / 重连 / 限流）需要真实 XTP SDK 与柜台环境，仍从零未做；对账留痕进 risk（X3）未接；core 侧旧 `LiveTrader` / `Broker` 未退役（R4）；`broker.order_acks` 的保留期未定（当前不自动删）。R5 已落（施工 ④，本仓腿）。
 >
 > **施工记录（2026-10-23，施工 ②）**：X6b 的**口径定稿**与 X6c 的**装配闸**已落，`go build/vet/test` 全绿（38 测试）——
@@ -109,7 +146,7 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 | X6a | `BrokerGateway` port + `MockTrader`（`ClientOrderID` 幂等 / 超时语义跑通）🔶（施工 ① 已落 `internal/gateway`，未接 core） | `QT-45` | 本仓立项 + M8 对表 ✅ |
 | X6b | 对账口径定稿（**账户快照** `QuerySettlement` + 真实 broker 侧 + 差异注入验收）🔶（施工 ② 口径纯函数 + 差异注入验收已落 `internal/reconcile`；真实 broker 侧归 X6c 全量） | `QT-45` | X6a |
 | X6c | `XTPTrader` 适配器（从零实现；装配前置：对账 + 幂等 + 熔断，缺一构造期拒绝）**⛔ 阻塞（G7，2026-10-25）**——装配闸 + fail-closed 骨架 + 持久幂等映射已落，全量实现缺 P1~P5 五项外部条件（SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗），本仓与 core 与本机与 CI **四处都没有 SDK**；取证、剩余范围切分与触发条件见 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) | `QT-45` | X6b ＋ **P1+P2 到手且当天有 P5 时间窗** |
-| X6d | 独立进程（回环监听 + 健康检查）——**2026-10-23 裁决：暂缓**（触发条件未到；见 ADR 0002 代价 4 与 `ARCHITECTURE.md` §8） | `QT-45` | 多账户共用通道 / 通道级高可用 |
+| X6d | 独立进程（回环监听 + 健康检查）——**ADR-036（2026-10-26）取代 2026-10-23「暂缓」**：本仓按服务定位，G0 先落 Mock 服务入口；真实 XTP 仍受 X6c 阻塞 | `SVC-BROKER-G0` / `QT-45` | 多账户共用通道 / 通道级高可用 |
 
 ## 二、跨仓指针（不在本仓，勿双写）
 

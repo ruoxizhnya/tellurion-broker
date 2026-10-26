@@ -6,12 +6,15 @@ verified-by: G7（施工 ⑤）撤单 `order_not_found` 判据补进 §3；此�
 
 # API Schema — tellurion-broker
 
-> **契约地位**：**Go port（进程内）**，不是 HTTP。
+> **契约地位**：**Go port（进程内）**，订单面今天不是 HTTP。
 > `BrokerGateway` 按"将来可远程"设计（DTO 序列化友好），但当前与实盘运行域同进程 —— 下单是延迟敏感路径，独立进程 = 每笔多一次网络跳。
+> **ADR-036（2026-10-26）已把本仓定位为服务**：G0 先落 `/healthz`、`/version`；**订单 HTTP 面归 `SVC-BROKER-G1`**；真实 XTP 的低延迟路径是否留在进程内，在 X6c 前另立 ADR 决定。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
 > **今天 vs 目标**：本仓 `internal/gateway` 已落本文四个 port + DTO + 12 哨兵 + 内存 `Mock` + `XTPTrader` fail-closed 骨架（装配闸：缺持久幂等映射 / 对账 / 健康检查任一即构造期拒绝；已装配后全方法恒 `channel_down`，零 fake success），`internal/reconcile` 已落快照口径对账纯函数，`internal/ackstore` 已落持久幂等映射 `broker.order_acks`（2026-10-23，ADR 0002），**未接 core、无 XTP SDK 链路**；core 侧仍有 `LiveTrader`（Mock / XTP）与 `Broker`（`SimulatedBroker`）两套旧面待退役（R4）。现状矩阵与取舍见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8，八条实测事实见 §9.1（基线 core `dbe4c68`）。
-> **port 的落点**：契约位是 **contracts**（`BrokerGateway` / 新 DTO 不随 S1 批量迁，随 X6a 定稿）；本仓是实现的物理归属，不是常驻服务（`tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2）。
+> **port 的落点**：契约位是 **contracts**（`BrokerGateway` / 新 DTO 不随 S1 批量迁，随 X6a 定稿）。
+> **ADR-036（2026-10-26）后本仓是服务**：G0 已落 `cmd/brokergateway`（`/healthz`、`/version`）+ Dockerfile/deploy（`:8091`）；
+> 订单/查询/对账的 **HTTP 面归 `SVC-BROKER-G1`**（今天仍是 Go port，进程内形态保留给真实 XTP 的低延迟路径）。
 
 ## 1. 接口面（目标 port）
 
