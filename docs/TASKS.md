@@ -34,7 +34,7 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 > - **破坏验证**：`git rm --cached -r cmd` 后 `git ls-files cmd/` = 0 行（红）→ `git reset -- cmd` 逐字节还原 → 1 行（绿），工作区零改动。
 > - **如实登记**：未引 SDK / C 工具链；未改 `pkg/live`（core 侧）；未自造 order intent DTO；compose 未注入 `BROKER_DATABASE_DSN`（G0 用内存 AckStore，接 PG 归 G1）；X6c 仍 ⛔ 永久。
 
-### SVC-BROKER-G1 · 订单 HTTP 契约（ADR-036 G1）[P0] ⛔（2026-10-26 复核：等 A 组 broker DTO）
+### SVC-BROKER-G1 · 订单 HTTP 契约（ADR-036 G1）[P0] ⬜（2026-10-26 死锁裁定：**前置已解除，可立即开工**——不再等 contracts DTO）
 
 - **① 目标**：把现有 Go port 的订单/查询/对账能力暴露成版本化 HTTP 面，供 core 远程调用。
 - **② 上下文**：`docs/api-schema.md` 明写今天是「Go port（进程内），不是 HTTP」；ADR-036 把本仓定为服务，G1 必须补 HTTP 形状。
@@ -43,7 +43,16 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 - **⑤ 验收**：core 能通过 HTTP 完成下单/查单/撤单/持仓/对账；12 错误码逐条可复现；`api-schema.md` 与实现一致。
 - **⑥ 边界**：本仓只保证网关面；core 侧调用与旧实现退役由 `SVC-BROKER-G3` / `SVC-CORE-BROKER-RETIRE` 跟踪。
 
-> **⛔ 开工前置复核（2026-10-26，未开工）**：等 A 组 broker DTO（contracts 侧）与 `go.mod` 引 contracts / kit；今天 `go.mod` 两者皆无。本轮未自造 order intent DTO。
+> **⛔ → ⬜ 开工前置裁定（2026-10-26，执行侧代裁，待主任追认）**：本单原记的 ⛔ 理由是「等 A 组 broker DTO（contracts 侧）」，
+> 而 contracts 那份材料（`tellurion-contracts:docs/design/shape-packages-decision-material.md` §0 行 ③ 与 §3.1）写的正是
+> 「③ 的前置 = `SVC-BROKER-G1` 先把订单 HTTP 面定形」——**两条并读就是互为前置的死锁**，谁都不许开工且不会自动解开。
+> 裁定 **G1 先行**（判据、三条理由与代价见那份材料新增的 §3.1.1）：订单 DTO 的形状 owner 在 HTTP 面落地前**留在本仓**
+> （`internal/gateway/model.go:80-186`，今天已经在那儿），contracts 的 `CT-05` 是**事后收编**，不是先立法。
+> ⇒ 本单今天可开工的判据：`go.mod` 无需先引 contracts（kit 仍需在写侧 service token 时引入）；**不许**再拿「等 A 组」当不动手理由。
+> **窗口期两条义务（缺一即 G1 不算落定，`CT-05` 不许开工）**：① `docs/api-schema.md` 写出订单 / 成交 / 账户三族的
+> **逐字段报文表**（字段名 + 可空性 + 类型），并有 httpapi 用例断言序列化后的键集合；② 收编时**删本地形状改引契约** +
+> 同一条报文快照**改前 / 改后逐字节一致**，不允许两份并存。
+> 本轮仍未做：没自造 order intent DTO（本轮只裁顺序，不动代码）；`go.mod` 无 contracts / kit。
 
 ### SVC-BROKER-G3 · core 切读与旧 LiveTrader 退役（ADR-036 G3）[P0] ⛔（2026-10-26 复核：无消费面）
 
