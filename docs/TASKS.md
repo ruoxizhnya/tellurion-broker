@@ -64,6 +64,8 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 - **⑥ 边界**：本仓只保证网关；core 代码删除由 `SVC-CORE-BROKER-RETIRE` 跟踪。
 
 > **⛔ 开工前置复核（2026-10-26，未开工）**：等 C 组 QT-51 合入（core 无执行 port 则无消费面）+ B 组 `SVC-CORE-BROKER-RETIRE` 立单；本仓 G1 HTTP 面未落，G3 无第二条实现可对拍。X6c 维持 ⛔ 永久（全仓无 SDK / C 工具链）。
+>
+> ⚠️ **同日实测订正两处**：① `SVC-CORE-BROKER-RETIRE` **已立单**——`tellurion:docs/TASKS.md:157`「六之二」，串行第 9（判据 = B 组材料 §4.6），不再是本单的前置；② G1 的死锁已裁（见上方 `SVC-BROKER-G1` 的裁定块：G1 先行、DTO 暂留本仓）。⇒ 本单真正的剩余前置只剩两条：**QT-51 合入**（2026-10-26 复测：`pkg/backtest/execution/port.go` 仍只在未合入分支 `task/qt51-execution-port`，main 上 `git cat-file -e main:pkg/backtest/execution/port.go` 失败 ⇒ 这条 ⛔ 属实）**+ G1 HTTP 面落地**。
 
 ### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] 🔶
 
@@ -143,6 +145,33 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 ---
 
 > **⚠️ 开工前置（refactor-plan-review M5/M8，2026-10-20 登记）**：本表任何单开工前，必须先过 core `tellurion:docs/TASKS.md`「五、X 线」的**公共前置**两条：① 建仓/升格前先与 ADR-027 §2 对账（12 仓是上限/当前规划，不是承诺终态）；② 本仓设计文档先写「**接口对表**」小节（签名 + 错误语义 + 版本策略，模板见 `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1），**未对表不开工**。正文以彼处为准，此处只留指针、不镜像。
+
+### SVC-BROKER-G2 · 服务就绪门 G2：`broker.order_acks` 唯一 writer · 保留期与部分索引（裁决 ⑨）[P1] ⬜
+
+- **① 目标**：`broker` schema 满足 ADR-036 §3 的 G2（自有 schema、迁移可重放、无跨 schema 写），并把第三轮裁决 **⑨** 已拍定的保留期与索引**落进 DDL 与作业**——这条裁决今天**没有任何条目承载**。
+- **② 上下文**：裁决 ⑨ 原文（本文件 `:14`）：「`broker.order_acks` 保留期 = **90 天**，只删 `ack IS NOT NULL`，先加 `(updated_at) WHERE ack IS NOT NULL` 部分索引，单批 ≤ 5000 行；90 天登记为**暂定假设**（柜台可查窗口未知）」；实测 `internal/ackstore/ddl.go` 的 `migrationStatements` 今天只有三条：`CREATE SCHEMA`、`CREATE TABLE broker.order_acks`（主键 `(account_id, client_order_id)`）、无其它索引 ⇒ **裁决的「先加部分索引」未落**；全仓生产代码无保留期删除语句（`DELETE FROM broker.order_acks` 只在 `internal/ackstore/pg_test.go:48` 的清理里出现）；台账 `:101` 与 `:109` 仍写「保留期未定（它要的是柜台可查窗口这个**事实**）」——这句与裁决 ⑨ 已被拍定为「90 天暂定」相冲突，属**账实不符**，本单第 ① 件事就是把它对齐。
+- **③ 要求**：① 按裁决加部分索引 `CREATE INDEX IF NOT EXISTS … ON broker.order_acks (updated_at) WHERE ack IS NOT NULL`（加进 `migrationStatements()` 这条唯一路径，幂等）；② 新增保留期清理：只删 `ack IS NOT NULL` 且 `updated_at < now() - interval '90 days'` 的行，**单批 ≤ 5000**（裁决原值），批间可让出锁；③ 把「90 天是暂定假设」写进 `docs/db-schema.md` 与 `AGENTS.md` §1 状态行，并登记**触发复核的条件**（柜台可查窗口一旦已知即重算）；④ 迁移重放自证：同一测试库连跑两次 `Migrations()`，行数 / `pg_indexes` / 列集指纹逐位不变（`BROKER_TEST_DSN` 腿，无库 skip）；⑤ 禁跨 schema 写护栏：本仓 SQL 只允许 `broker.` 的写语句；⑥ 明确 fail-closed 边界：**未 ack 的行（`ack IS NULL`）永不被清理**——那是「可能已发出而不知结果」的唯一证据，删它等于制造重复下单（与 `api-schema.md` §2 的 `unknown_state` 语义同一口径）。
+- **④ 约束与非目标**：不改 `Reserve` / `Load` / `SaveAck` / `Durable` 四方法语义（ADR 0002 的幂等映射契约）；不动主键形状；不在真钱路径上跑清理（X6c ⛔）；不引调度框架（清理可以是进程内周期任务或运维脚本，但要写明选哪个及为什么）；不 `DROP` 表。
+- **⑤ 验收**：① `pg_indexes` 里出现该部分索引，且重放第二次执行后索引集与第一次逐位相同；② 清理用例三条：`ack IS NOT NULL` 且超 90 天 ⇒ 删；`ack IS NULL` 且超 90 天 ⇒ **不删**（这条是护栏，破坏验证：去掉 `ack IS NOT NULL` 谓词 ⇒ 红）；单批 > 5000 行时只删 5000 且不返回错误（批处理可续）；③ 破坏验证：往本仓任一 SQL 常量加 `UPDATE quant.orders` ⇒ 跨 schema 护栏红、还原复绿；④ `docs/db-schema.md` 的保留期一行与裁决一致并标注「暂定 + 复核条件」；⑤ 三条命令单仓绿。
+- **⑥ 边界**：本仓 schema 生命周期；订单 HTTP 面归 `SVC-BROKER-G1`（⛔），DTO 进契约归 `tellurion-contracts:CT-05`（⛔，与本单互为死锁的裁点已在 CT-05 写明）。
+
+### R10 · 幂等映射读失败的哨兵从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`（㉒ 已裁「现在修」）[P1] ⬜
+
+- **① 目标**：兑现第三轮裁决 ㉒ 的另一半——「**R10 现在修**：`internal/gateway/mock.go:358/415` 的映射读失败从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`，两处同口径 + 各一条用例」；这条裁决今天**没有条目承载**，且台账 `:94-101` 仍把它写成「待裁」（账实不符，本单落完同批订正）。
+- **② 上下文**：实测两处仍在——`internal/gateway/mock.go:358`（`CancelOrder` 路径里 `m.store.Load` 失败 → `fmt.Errorf("%w: %v", ErrChannelDown, err)`）与 `:415`（`QueryOrder` 同形）；正确哨兵 `ErrIdempotencyStoreUnavailable` 已存在（`internal/gateway/errors.go:36`）且在**发送前**的三处用对了（`mock.go:153/159/169`）⇒ 只有「读映射失败」这一类被错报成「通道断了」。为什么必须改：调用方看到 `channel_down` 会按「柜台侧不可达」处置（重试/等恢复），而真实情况是**本仓自己的幂等存储读不出来**，这一单可能已在柜台上；把「我存储坏了」报成「线路断了」是把诊断责任推给上游。
+- **③ 要求**：① 两处同批改哨兵，报文保留底层 `err` 上下文（`%w: %v`）；② 各一条用例：注入一个 `Load` 返回错误的 store ⇒ 断言错误链里是 `ErrIdempotencyStoreUnavailable` 且**不是** `ErrChannelDown`；③ `api-schema.md` §2/§3 的错误语义表同步（这一条改变对外报文，属文档触发器）；④ 同批订正 `docs/TASKS.md` 头部与 `:94-101` 里「R10 待裁」的陈述（改为已裁已落，R9 维持「暂缓到 X6c」，㉒ 原文如此）。
+- **④ 约束与非目标**：**不改** `found == true` 时的 `ErrUnknownState` 分支（那是正确行为，裁决没动它）；不改 R9 的三条 Mock/柜台行为差异（㉒ 明裁暂缓）；不动 `Disconnect()` 与真实断连路径的 `ErrChannelDown`（那些确实是通道断）；不改 DDL。
+- **⑤ 验收**：① 两条新用例先红（实现未改时断言拿不到 `ErrIdempotencyStoreUnavailable`）后绿；② **破坏验证**：把其中一处改回 `ErrChannelDown` ⇒ 对应用例红、还原复绿；③ `git grep -n 'ErrChannelDown' -- internal/gateway/mock.go` 的结果里 `:358`/`:415` 两条**不再存在**，其余（真断连路径）保持；④ `api-schema.md` 错误表与本仓实现逐字一致；⑤ 三条命令绿（`BROKER_TEST_DSN` 有库时集成腿一并跑，无库时如实记 skip）。
+- **⑥ 边界**：只改这一类错误归属；订单 HTTP 面（`SVC-BROKER-G1`）与 X6c 不在本单。
+
+### SVC-BROKER-G4 · 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036）[P1] ⬜
+
+- **① 目标**：把「通道什么时候算不可用、不可用时对外说什么、谁来判断」写成文档并演练一次——本仓是全系统唯一**直接面对钱**的边界，失败语义含糊的代价与其它五仓不同量级。
+- **② 上下文**：`cmd/brokergateway` 已有 `/healthz` + `/version`（G0 ✅，`:8091`）；`XTPTrader` 是 fail-closed 骨架（构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一、或 `Acks.Durable()==false` 即拒绝；装配后所有方法恒 `channel_down`，**零 fake success**）——这个姿势是对的，本单不改行为、只把它变成可核对的文档与演练；**`/readyz` 全 workspace 0 命中**（gateway 没有监听业务端口，「就绪」到底指什么必须先回答）；PG 只用于幂等映射，映射不可用与柜台不可用**必须是两个码**（R10 就是这条的具体化）；无 runbook（全 workspace `runbook` 只在 ADR-036 正文）；X6c 的四份 `docs/x6c-xtp-readiness.md` 有 P1~P5 前置，但「运维怎么判断现在能不能开」没有一页纸。
+- **③ 要求**：① 失败语义表：`channel_down` / `unknown_state` / `idempotency_store_unavailable` / `order_not_found` / 幂等冲突 / 申报数量不合规（`internal/gateway/lot`）六类，各写「网关侧发生了什么、调用方**能做什么**（重试？换新 ID？必须查单？）」。其中「`unknown_state` 时严禁换 `client_order_id` 重发」是本仓最要命的一条，必须单独成行并有反证；② 就绪定义成文：gateway 无监听 ⇒ 显式声明「`/healthz` 即唯一探针，就绪 = 装配闸通过」，或引入 `/readyz` 检查 PG 池 + `Acks.Durable()`——**二选一在单内定死**，不许留给读者猜；③ 熔断（`KillSwitch`）触发与解除的运维姿势与留痕；④ `docs/runbook.md`：起停、看装配闸为什么拒、幂等映射怎么查（含 `BROKER_TEST_DSN` 集成腿姿势）、`unknown_state` 的排查顺序、与 core 对账（`internal/reconcile` 快照口径）怎么跑；⑤ 一次演练：关掉 PG ⇒ 断言网关**不 fake success** 且错误是 `idempotency_store_unavailable`（R10 落完后），恢复后可继续；⑥ 把「未接真钱」写成本仓的永久性 G4 前置（X6c ⛔），并说明**开真钱之前 G1/G2/G3/G4 必须全绿**这条闸门。
+- **④ 约束与非目标**：不改 fail-closed 骨架的行为（它是设计，不是缺陷）；不在本单落订单 HTTP 面（`SVC-BROKER-G1` ⛔）；不接真实 XTP（X6c ⛔，四处无 SDK）；不引 APM；不做多副本。
+- **⑤ 验收**：① 失败语义表六类齐全，且每类有「调用方动作」一列；② 反证用例：`unknown_state` 的报文里必须出现「不得重发/先查单」的语义（用例断言错误文本或 code），破坏验证：删掉该提示 ⇒ 红；③ 就绪口径在 `api-schema.md` 与 `runbook.md` 两处一致；④ 演练有真退出码（关 PG 前后各一次）；⑤ runbook 每条命令当场执行；⑥ 三条命令绿。
+- **⑥ 边界**：本仓失败语义与运维面；订单 HTTP 契约归 `SVC-BROKER-G1`，DTO 进契约归 `tellurion-contracts:CT-05`，core 旧实现退役归 `tellurion:SVC-CORE-BROKER-RETIRE`。
 
 ## 施工序（候选单，开工前必须展开成六字段）
 
