@@ -50,7 +50,7 @@ go test ./...
 | 依赖 | 版本 | 说明 |
 |---|---|---|
 | `github.com/ruoxizhnya/tellurion-contracts` | 未引入（远端最新 `v0.6.0`，2026-10-24 发版；2026-10-25 实测远端 tag 确为 `v0.6.0`） | `BrokerGateway` 契约；实测本仓对 contracts 的 import = **0** |
-| `github.com/ruoxizhnya/tellurion-kit` | 未引入（远端最新 `v0.1.3`，2026-10-25 发版） | 日志 / HTTP |
+| `github.com/ruoxizhnya/tellurion-kit` | 未引入（远端最新 `v0.1.4`，2026-10-25 发版；2026-10-26 实测远端 tag 确为 `v0.1.4`） | 日志 / HTTP |
 | `github.com/jackc/pgx/v5` | `v5.7.3` | `internal/ackstore` 的 PG 连接池与查询（幂等映射 `broker.order_acks`，ADR 0002）；版本与 core / kit / strategy 对齐 |
 
 > 今日 `go.mod` 的**唯一直接依赖**是 `pgx v5.7.3`（其余是它的间接依赖）：`internal/gateway` / `internal/reconcile` 仍只用 stdlib；port / DTO 暂由本仓定义，`BrokerGateway` 随 X6a 定稿后落 contracts（R4）。
