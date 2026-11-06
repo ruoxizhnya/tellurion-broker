@@ -1,20 +1,19 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: G7（施工 ⑤）撤单 `order_not_found` 判据补进 §3；此前 R2 裁决 + 持久幂等映射落地（ADR 0002 / X6c 幂等持久化）
+last-verified: 2026-11-07
+verified-by: G1 施工 —— 订单/查询/对账 HTTP 面落地（§1.5）；此前 G7（施工 ⑤）撤单 `order_not_found` 判据、R2 裁决（ADR 0002）
 ---
 
 # API Schema — tellurion-broker
 
-> **契约地位**：**Go port（进程内）**，订单面今天不是 HTTP。
-> `BrokerGateway` 按"将来可远程"设计（DTO 序列化友好），但当前与实盘运行域同进程 —— 下单是延迟敏感路径，独立进程 = 每笔多一次网络跳。
-> **ADR-036（2026-10-26）已把本仓定位为服务**：G0 先落 `/healthz`、`/version`；**订单 HTTP 面归 `SVC-BROKER-G1`**；真实 XTP 的低延迟路径是否留在进程内，在 X6c 前另立 ADR 决定。
+> **契约地位**：**Go port（进程内）+ 版本化 HTTP 面（`/api/broker`，2026-11-07 起）**。
+> `BrokerGateway` 按"将来可远程"设计（DTO 序列化友好），port 形态与实盘运行域同进程（下单是延迟敏感路径）；HTTP 面是**服务间调用面**（ADR-036 G1），两者共用同一份实现与同一套 DTO，见 §1.5。
+> **ADR-036（2026-10-26）已把本仓定位为服务**：G0 已落 `/healthz`、`/version`；**订单 HTTP 面已在 `SVC-BROKER-G1` 落地**；真实 XTP 的低延迟路径是否留在进程内，在 X6c 前另立 ADR 决定。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
-> **今天 vs 目标**：本仓 `internal/gateway` 已落本文四个 port + DTO + 12 哨兵 + 内存 `Mock` + `XTPTrader` fail-closed 骨架（装配闸：缺持久幂等映射 / 对账 / 健康检查任一即构造期拒绝；已装配后全方法恒 `channel_down`，零 fake success），`internal/reconcile` 已落快照口径对账纯函数，`internal/ackstore` 已落持久幂等映射 `broker.order_acks`（2026-10-23，ADR 0002），**未接 core、无 XTP SDK 链路**；core 侧仍有 `LiveTrader`（Mock / XTP）与 `Broker`（`SimulatedBroker`）两套旧面待退役（R4）。现状矩阵与取舍见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8，八条实测事实见 §9.1（基线 core `dbe4c68`）。
+> **今天 vs 目标**：本仓 `internal/gateway` 已落本文四个 port + DTO + 12 哨兵 + 内存 `Mock` + `XTPTrader` fail-closed 骨架（装配闸：缺持久幂等映射 / 对账 / 健康检查任一即构造期拒绝；已装配后全方法恒 `channel_down`，零 fake success），`internal/httpapi` 已落 HTTP 面（§1.5），`internal/reconcile` 已落快照口径对账纯函数，`internal/ackstore` 已落持久幂等映射 `broker.order_acks`（2026-10-23，ADR 0002）与保留期清理（G2），**未接 core（归 G3）、无 XTP SDK 链路**；core 侧仍有 `LiveTrader`（Mock / XTP）与 `Broker`（`SimulatedBroker`）两套旧面待退役（R4）。现状矩阵与取舍见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8，八条实测事实见 §9.1（基线 core `dbe4c68`）。
 > **port 的落点**：契约位是 **contracts**（`BrokerGateway` / 新 DTO 不随 S1 批量迁，随 X6a 定稿）。
-> **ADR-036（2026-10-26）后本仓是服务**：G0 已落 `cmd/brokergateway`（`/healthz`、`/version`）+ Dockerfile/deploy（`:8091`）；
-> 订单/查询/对账的 **HTTP 面归 `SVC-BROKER-G1`**（今天仍是 Go port，进程内形态保留给真实 XTP 的低延迟路径）。
+> **ADR-036（2026-10-26）后本仓是服务**：G0 已落 `cmd/brokergateway`（`/healthz`、`/version`）+ Dockerfile/deploy（`:8091`）；G1 已落订单/查询/对账 HTTP 面（§1.5）。
 
 ## 1. 接口面（目标 port）
 
@@ -70,6 +69,87 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 | 数量上限、集中度、T+1、止损 | **RiskPolicy**（进程内裁决，规则源在 risk 服务） |
 
 > ✅ **本仓腿已落（2026-10-24，R5）**：申报数量规则抽为通道侧纯函数 `internal/gateway/lot`（无 I/O），Mock 已改调同一份；core 的 `risk.ValidateOrderQuantity` 尚未退役、XTP 全量适配器尚未接入（归 X6c 跨仓腿）。规则**归通道侧**，网关**不 import 风控裁决**。
+
+## 1.5 HTTP 面（`SVC-BROKER-G1`，2026-11-07 落地）
+
+> **实现**：`internal/httpapi`（只做报文与错误码翻译，不裁决、不改单、不持状态），挂载在 `cmd/brokergateway` 的 `/api/broker/` 下；port 形态（§1）保留，两者是**同一份实现的两个面**。
+> **窗口期义务（CT-05 收编前置）**：本节就是订单 / 成交 / 账户三族的**逐字段报文表**；`internal/httpapi` 的用例**断言序列化后的键集合**（`TestOrderAndAccountPayloadShapes`）。收编契约时必须「删本地形状改引契约」，且在**同一份报文快照**上证明改前 / 改后逐字节一致——**不允许两份 DTO 并存**。
+
+### 1.5.1 路由
+
+| 方法 | 路径 | 语义 | 需要 service token |
+|---|---|---|---|
+| `POST` | `/api/broker/orders` | 下单（`OrderRequest` → `OrderAck`） | 是 |
+| `GET` | `/api/broker/orders/{clientOrderID}` | 查单（→ `OrderState`） | 否 |
+| `DELETE` | `/api/broker/orders/{clientOrderID}` | 撤单（→ `OrderState`） | 是 |
+| `GET` | `/api/broker/accounts/{accountID}/positions` | 持仓（→ `Position[]`） | 否 |
+| `GET` | `/api/broker/accounts/{accountID}/account` | 账户快照（→ `AccountSnapshot`） | 否 |
+| `GET` | `/api/broker/accounts/{accountID}/fills?since=RFC3339` | 成交（→ `Fill[]`，`since` 可省 = 全量） | 否 |
+| `GET` | `/api/broker/accounts/{accountID}/settlement?as_of=RFC3339` | 对账快照（→ `AccountSnapshot`） | 否 |
+| `POST` | `/api/broker/emergency-flatten` | 紧急清仓（body `{"reason":string}` → `EmergencyFlattenResult`） | 是 |
+
+**鉴权**：写侧要求 `Authorization: Bearer $BROKER_SERVICE_TOKEN`（常量时间比较）。**环境变量未设 = 写侧关闭**（`503 writes_disabled`），不是"不校验"；token 不匹配 = `401 unauthorized`。读侧是本机服务面，G1 不做鉴权（G4 的就绪/鉴权矩阵再定）。
+
+**幂等**：键仍是 `(account_id, client_order_id)`，与 port 形态完全一致；重放返回**原回执**且 `idempotent_replay=true`。传输层不另造幂等键。
+
+### 1.5.2 请求报文
+
+| 字段 | 类型 | 可空 | 判据 |
+|---|---|---|---|
+| `client_order_id` | string | 否 | 调用方生成、重试不变；网关不改写不生成 |
+| `account_id` | string | 否 | 必须与网关服务的账户一致（否则 `account_mismatch`） |
+| `symbol` | string | 否 | 6 位代码，不带交易所后缀 |
+| `side` | `"buy"` \| `"sell"` | 否 | 其余值 → `invalid_order` |
+| `order_type` | `"market"` \| `"limit"` | 否 | 其余值 → `invalid_order` |
+| `quantity` | integer | 否 | >0，且是申报单位的整数倍（`internal/gateway/lot`） |
+| `limit_price` | number | 限价必填 / 市价省略 | 限价单缺失 → `invalid_order` |
+
+### 1.5.3 响应报文（逐字段）
+
+**`OrderAck`（下单回执）**
+
+| 字段 | 类型 | 可空 | 说明 |
+|---|---|---|---|
+| `client_order_id` | string | 否 | 原样回显 |
+| `broker_order_id` | string | 是（omitempty） | 柜台单号；未受理时缺省 |
+| `status` | 八值枚举 | 否 | §1 的 `OrderStatus`；`unknown` = 未决，禁止重发 |
+| `idempotent_replay` | bool | 否 | `true` = 本次是同载荷重放，返回的是原回执 |
+| `accepted_at` | RFC3339 | 否 | UTC |
+| `code` / `reason` | string | 是（omitempty） | 仅拒单/异常时出现 |
+
+**`OrderState`（查单 / 撤单结果）**：`client_order_id`(string, 否)、`broker_order_id`(string, 可空)、`status`(枚举, 否)、`filled_quantity`(integer, 否)、`avg_fill_price`(number, 否，无成交为 0)、`remaining_quantity`(integer, 否)、`last_update`(RFC3339, 否)、`code`/`reason`(string, 可空)。
+
+**`Fill`（成交回报）**：`fill_id`(string, 否，稳定不重复)、`client_order_id`(string, 否)、`broker_order_id`(string, 可空)、`symbol`(string, 否)、`side`(枚举, 否)、`quantity`(integer, 否)、`price`(number, 否)、`commission`(number, 否)、`stamp_tax`(number, 否)、`transfer_fee`(number, 否)、`filled_at`(RFC3339, 否)。
+
+**`Position`（柜台口径持仓）**：`account_id`(string, 否)、`symbol`(string, 否)、`quantity`(integer, 否)、`available_quantity`(integer, 否，T+1 后可用)、`avg_cost`(number, 否)、`market_value`(number, 否)、`as_of`(RFC3339, 否)。本地 T+1 记账字段**不进报文**。
+
+**`AccountSnapshot`（账户 / 对账共用）**：`account_id`(string, 否)、`as_of`(RFC3339, 否)、`cash`(对象, 否：`total` / `available` 均为 number)、`total_assets`(number, 否)、`positions`(`Position[]`, 否，空集合是 `[]` 不是 `null`)、`fees`(对象, 否：`commission` / `stamp_tax` / `transfer_fee` 均为 number)。
+
+**`EmergencyFlattenResult`**：`sold`(`FlattenedPosition[]`, 否)、`skipped`(`SkippedPosition[]`, 否)、`sold_total`(number, 否)、`started_at`(RFC3339, 否)、`completed_at`(RFC3339, 可空)、`reason`(string, 否)。
+- `sold[]` 元素：`account_id`、`symbol`、`quantity`、`client_order_id`、`broker_order_id`(可空)、`avg_fill_price`、`filled_at`。
+- `skipped[]` 元素：`account_id`、`symbol`、`quantity`、`reason`。**`skipped` 非空不等于失败**：它是"没有确认成交"，逐条带原因。
+
+**错误信封**：`{"code": string, "message": string, "ack"?: OrderAck}`。`code` 取自 §2 的 12 个契约码，或下列**非订单**码（鉴权 / 装配，不属契约哨兵）：
+
+| code | HTTP | 场景 |
+|---|---|---|
+| `unauthorized` | 401 | 缺 token / token 不匹配（写侧） |
+| `writes_disabled` | 503 | `BROKER_SERVICE_TOKEN` 未配置，写面关闭 |
+| `invalid_request` | 400 | body 不是合法 JSON / 缺 `reason` / 时间参数不是 RFC3339 |
+| `internal_error` | 500 | 未识别的错误（不猜成 4xx） |
+
+### 1.5.4 12 个契约码的 HTTP 映射
+
+| code | HTTP | code | HTTP |
+|---|---|---|---|
+| `order_rejected` | 409 | `invalid_order` | 400 |
+| `unknown_state` | 409（未决，**禁止重发**） | `rate_limited` | 429 |
+| `channel_down` | 503 | `not_supported` | 501 |
+| `duplicate_order` | 409 | `account_mismatch` | 403 |
+| `order_not_found` | 404 | `insufficient_buying_power` | 409 |
+| `order_not_cancelable` | 409 | `idempotency_store_unavailable` | 503 |
+
+> `order_rejected` 的响应**同时**带 `ack`（回执留痕，§2 的"ack 与 error 同时非 nil"在 HTTP 面翻译成 409 + `ack` 字段）。
 
 ## 2. 错误码与 fail-closed 语义
 

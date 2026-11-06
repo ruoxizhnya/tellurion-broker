@@ -23,6 +23,7 @@ import (
 
 	"tellurion-broker/internal/ackstore"
 	"tellurion-broker/internal/gateway"
+	"tellurion-broker/internal/httpapi"
 )
 
 var (
@@ -85,6 +86,19 @@ func main() {
 		})
 	})
 
+	// 版本化订单 HTTP 面（G1）：写侧要求 BROKER_SERVICE_TOKEN，未设即关闭写面。
+	writeToken := os.Getenv("BROKER_SERVICE_TOKEN")
+	api := httpapi.New(httpapi.Config{
+		Gateway:    mock,
+		Settlement: mock,
+		KillSwitch: mock,
+		WriteToken: writeToken,
+	})
+	mux.Handle("/api/broker/", api.Handler())
+	if writeToken == "" {
+		log.Printf("brokergateway: BROKER_SERVICE_TOKEN not set; write endpoints are disabled")
+	}
+
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           mux,
@@ -98,7 +112,7 @@ func main() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	log.Printf("brokergateway: listening on %s (mock account=%s, order HTTP API = G1)", *addr, *accountID)
+	log.Printf("brokergateway: listening on %s (mock account=%s, order API = /api/broker)", *addr, *accountID)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("brokergateway: listen: %v", err)
 	}

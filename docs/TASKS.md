@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-07
-verified-by: G2（代码已落，PG 集成腿未执行，记 🔶）+ R10 施工 —— 部分索引 / 90 天暂定保留期与进程内清理；R10 幂等映射读失败哨兵（两处 + 两腿 + 破坏验证）；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
+verified-by: G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 🔶（代码已落，PG 集成腿未执行）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -34,7 +34,7 @@ verified-by: G2（代码已落，PG 集成腿未执行，记 🔶）+ R10 施工
 > - **破坏验证**：`git rm --cached -r cmd` 后 `git ls-files cmd/` = 0 行（红）→ `git reset -- cmd` 逐字节还原 → 1 行（绿），工作区零改动。
 > - **如实登记**：未引 SDK / C 工具链；未改 `pkg/live`（core 侧）；未自造 order intent DTO；compose 未注入 `BROKER_DATABASE_DSN`（G0 用内存 AckStore，接 PG 归 G1）；X6c 仍 ⛔ 永久。
 
-### SVC-BROKER-G1 · 订单 HTTP 契约（ADR-036 G1）[P0] ⬜（2026-10-26 死锁裁定：**前置已解除，可立即开工**——不再等 contracts DTO）
+### SVC-BROKER-G1 · 订单 HTTP 契约（ADR-036 G1）[P0] ✅（2026-11-07）
 
 - **① 目标**：把现有 Go port 的订单/查询/对账能力暴露成版本化 HTTP 面，供 core 远程调用。
 - **② 上下文**：`docs/api-schema.md` 明写今天是「Go port（进程内），不是 HTTP」；ADR-036 把本仓定为服务，G1 必须补 HTTP 形状。
@@ -54,6 +54,14 @@ verified-by: G2（代码已落，PG 集成腿未执行，记 🔶）+ R10 施工
 > 同一条报文快照**改前 / 改后逐字节一致**，不允许两份并存。
 > 本轮仍未做：没自造 order intent DTO（本轮只裁顺序，不动代码）；`go.mod` 无 contracts / kit。
 
+> **施工记录（2026-11-07）**：
+> - **落点**：新增 `internal/httpapi`（`httpapi.go`：路由、写侧 service token、12 哨兵 → HTTP 码映射、错误信封；**只翻译报文与错误，不裁决不改单**）；`cmd/brokergateway` 挂载 `/api/broker/`，`BROKER_SERVICE_TOKEN` 未设 = 写面关闭（`503 writes_disabled`），不匹配 = `401 unauthorized`；`go.mod` 仍无 contracts / kit 新依赖。
+> - **路由**：`POST /api/broker/orders`、`GET|DELETE /api/broker/orders/{clientOrderID}`、`GET /api/broker/accounts/{id}/positions|account|fills`、`GET .../settlement`、`POST /api/broker/emergency-flatten`；幂等键仍是 `(account_id, client_order_id)`，重放原回执 + `idempotent_replay=true`。
+> - **窗口期义务 ①（逐字段报文表 + 键集用例）**：`api-schema.md` 新增 §1.5（路由 / 鉴权 / 请求与响应逐字段表 / 错误信封 / 12 码 HTTP 映射）；`internal/httpapi` 的 `TestOrderAndAccountPayloadShapes` 逐族断言序列化后的键集合——**收编 CT-05 时的「改前 / 改后逐字节一致」有可比对基准**。义务 ②（删本地形状改引契约）留给 CT-05，本轮不预演。
+> - **验收（真实输出）**：`BUILD_EXIT=0` / `VET_EXIT=0` / `gofmt -l .` 空输出 / `TEST_EXIT=0`（5 个测试包 ok，其中 `internal/httpapi` 4 条用例 + 12 个子用例全 PASS）；**真实二进制 smoke**：临时 `go build` 后 `BROKER_SERVICE_TOKEN=smoke-token` 起在 `127.0.0.1:18091`，`GET /healthz` → 200 `{"status":"ok"}`、`POST /api/broker/orders` → 200 `{"client_order_id":"smoke-1","broker_order_id":"MOCK-000001","status":"accepted","idempotent_replay":false,...}`、`GET /api/broker/orders/smoke-1` → 200 accepted、无 token 的同一 POST → **401**；进程与临时 exe 已清理。
+> - **破坏验证（两条）**：① 把「token 未配置」分支改成放行 → `TestWriteEndpointsRequireServiceToken` 红（`disabled writes = 400 invalid_order`，`DESTROY_EXIT=1`）；② 把 `idempotency_store_unavailable` 映射改成 500/internal_error → 对应子用例红（`status = 500, want 503`，`DESTROY2_EXIT=1`）；均逐行还原后复绿。
+> - **未做（如实，不写成已完成）**：**core 侧调用未接**（消费与对拍归 `SVC-BROKER-G3`，仍受 QT-51 合入阻塞）；读侧未做鉴权（G4）；X6c 仍 ⛔；`-race` 本机跑不了（`CGO_ENABLED=0`）。
+
 ### SVC-BROKER-G3 · core 切读与旧 LiveTrader 退役（ADR-036 G3）[P0] ⛔（2026-10-26 复核：无消费面）
 
 - **① 目标**：core 的交易通道调用走本仓；core `pkg/live` / `pkg/live/broker` 旧实现退役（R4 关闭）。
@@ -66,6 +74,8 @@ verified-by: G2（代码已落，PG 集成腿未执行，记 🔶）+ R10 施工
 > **⛔ 开工前置复核（2026-10-26，未开工）**：等 C 组 QT-51 合入（core 无执行 port 则无消费面）+ B 组 `SVC-CORE-BROKER-RETIRE` 立单；本仓 G1 HTTP 面未落，G3 无第二条实现可对拍。X6c 维持 ⛔ 永久（全仓无 SDK / C 工具链）。
 >
 > ⚠️ **同日实测订正两处**：① `SVC-CORE-BROKER-RETIRE` **已立单**——`tellurion:docs/TASKS.md:157`「六之二」，串行第 9（判据 = B 组材料 §4.6），不再是本单的前置；② G1 的死锁已裁（见上方 `SVC-BROKER-G1` 的裁定块：G1 先行、DTO 暂留本仓）。⇒ 本单真正的剩余前置只剩两条：**QT-51 合入**（2026-10-26 复测：`pkg/backtest/execution/port.go` 仍只在未合入分支 `task/qt51-execution-port`，main 上 `git cat-file -e main:pkg/backtest/execution/port.go` 失败 ⇒ 这条 ⛔ 属实）**+ G1 HTTP 面落地**。
+>
+> ⚠️ **2026-11-07 复核**：前置之一 **G1 HTTP 面已落**（`internal/httpapi`，见上方施工记录）⇒ 本单剩余前置只剩 **QT-51 合入**；本单状态仍 ⛔ 不变（core 无执行 port 即无消费面，不能开工）。
 
 ### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] 🔶
 
