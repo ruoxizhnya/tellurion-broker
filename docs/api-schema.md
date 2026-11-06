@@ -88,7 +88,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 | `not_supported` | `ErrNotSupported` | 通道不支持该能力（如 XTP 未实现 `QueryFills`） | 否 | 降级或拒绝；**禁止**伪造成功形状 |
 | `account_mismatch` | `ErrAccountMismatch` | `accountID` 不属于本通道 | 否 | 配置错误，fail-loud |
 | `insufficient_buying_power` | `ErrInsufficientBuyingPower` | 柜台明确返回买力不足 | 是（已拒绝） | 不重试；告警 |
-| `idempotency_store_unavailable` | `ErrIdempotencyStoreUnavailable` | 幂等映射（持久化）不可用 | 否 | **不发送**；这是可用性事故，不是下单失败 |
+| `idempotency_store_unavailable` | `ErrIdempotencyStoreUnavailable` | 幂等映射（持久化）不可用（含下单发送前、以及查单/撤单读映射失败，R10） | 否 | **不发送**；这是可用性事故，不是下单失败 |
 
 **最重要的一条**：超时 = 状态未知，不是"失败"。盲目重发是实盘事故的经典来源。
 **第二重要的一条**：未实现的能力返回 `not_supported`，**绝不返回成功形状**（今天 XTP `EmergencyFlatten` 反例见 §9.1 F4）。
@@ -106,6 +106,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
   映射里也没有才允许 `order_not_found`。没有注入幂等映射（`Store=nil`）时本实例**发不出任何单**
   （`PlaceOrder` 恒 `idempotency_store_unavailable`），那种装配下的 `order_not_found` 才是可证的。误报 `not_found` 会让调用方按「没发过」换新 `ClientOrderID` 重发 → 柜台两笔。
 - `QueryOrder` / 查询面只读，天然幂等。
+- **映射读失败 = `idempotency_store_unavailable`，不是 `channel_down`**（R10，2026-11-07）：`CancelOrder` / `QueryOrder` 读幂等映射失败时报的是**本仓存储不可用**，不是「柜台侧不可达」——这一单可能已在柜台上，调用方不能按线路故障处置。真正的断连路径（`Disconnect()` / 发送前连接判定）仍报 `channel_down`。
 - 重试只允许在**确定未送达**时进行（`rate_limited` / 显式失败）；`unknown_state` 必须先 `QueryOrder`。
 - `EmergencyFlatten` 重入不重复卖：已无持仓 → 空 `Sold` + `nil`；每个 `Sold` 必须对应真实提交并确认的订单，未确认进 `Skipped`。
   - 清仓单的 `ClientOrderID` 必须**区分轮次**（同一笔持仓重入用同一个 ID；卖掉后重建仓要用新 ID）——否则会重放上一轮的已成交回执，把没下单的持仓报成清仓成功。

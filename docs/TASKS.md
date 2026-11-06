@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤单判据自审补正；此前 R2 裁决 + 持久幂等映射落地 + R5 申报数量纯函数（施工 ④）+ 文档同步
+last-verified: 2026-11-07
+verified-by: R10 施工 —— 幂等映射读失败的哨兵改 `ErrIdempotencyStoreUnavailable`（两处 + 两腿 + 破坏验证）；此前 G7（施工 ⑤）X6c ⛔ 判定 + 撤单判据自审补正、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -11,7 +11,7 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 > 每张单六字段（① 目标 ② 上下文 ③ 要求 ④ 约束与非目标 ⑤ 验收 ⑥ 边界），判据见 `tellurion:AGENTS.md` §8.5。
 > 完成即标 ✅（附日期）并移入 `docs/archive/TASKS-YYYY-MM-DD-archived.md`；本文件只留未完成项。
 
-> **第三轮裁决指针（2026-10-25）**：⑨ `broker.order_acks` 保留期 = **90 天**，只删 `ack IS NOT NULL`，先加 `(updated_at) WHERE ack IS NOT NULL` 部分索引，单批 ≤ 5000 行；90 天登记为暂定假设（柜台可查窗口未知）。㉒ **R10 现在修**（`internal/gateway/mock.go:358/415` 的映射读失败从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`，两处同口径 + 各一条用例）；**R9 暂缓到 X6c**，三条差异写进 `docs/x6c-xtp-readiness.md` §8。⑦ XTP 维持 ⛔。正文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` §五。
+> **第三轮裁决指针（2026-10-25）**：⑨ `broker.order_acks` 保留期 = **90 天**，只删 `ack IS NOT NULL`，先加 `(updated_at) WHERE ack IS NOT NULL` 部分索引，单批 ≤ 5000 行；90 天登记为暂定假设（柜台可查窗口未知）。㉒ **R10 现在修**（`internal/gateway/mock.go:358/415` 的映射读失败从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`，两处同口径 + 各一条用例；**2026-11-07 已落，见下方 R10 单**）；**R9 暂缓到 X6c**，三条差异写进 `docs/x6c-xtp-readiness.md` §8。⑦ XTP 维持 ⛔。正文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` §五。
 
 ---
 
@@ -100,7 +100,7 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 > 行补这条腿 / §9.7 R6 指向本文 + 新增 R9+R10 / §9.8 矩阵与自检结论 / frontmatter）、
 > `docs/README.md` §1/§2 导航、`AGENTS.md` §1 状态。
 > **未落项（如实，不写成已完成）**：X6c 全量适配器仍 ⛔（P1~P5 任一不满足即不动代码，触发条件见该文 §6）；
-> R9 / R10 待裁；`broker.order_acks` 保留期未定（它要的是「柜台可查窗口」这个**事实**，不是代码）；
+> R10 已落（2026-11-07，见本文件 R10 单）；R9 维持「暂缓到 X6c」（㉒ 原文如此）；`broker.order_acks` 保留期 = 90 天暂定（裁决 ⑨，DDL 与清理作业归 `SVC-BROKER-G2`）；
 > 对账留痕进 risk（X3）未接；core 旧 `LiveTrader` / `Broker` 退役（R4，跨仓腿）；**PG 集成腿本轮未跑**（服务未起）。
 >
 > **施工记录（2026-10-24，施工 ④）**：**R5 申报数量纯函数**落地，`go build/vet/test -count=1` 全绿（新增 `internal/gateway/lot`；用例覆盖 0 手 / 最小单位取整 / 超可用数量 / 涨跌停 / 越界价 / 非法入参）——
@@ -155,7 +155,7 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 - **⑤ 验收**：① `pg_indexes` 里出现该部分索引，且重放第二次执行后索引集与第一次逐位相同；② 清理用例三条：`ack IS NOT NULL` 且超 90 天 ⇒ 删；`ack IS NULL` 且超 90 天 ⇒ **不删**（这条是护栏，破坏验证：去掉 `ack IS NOT NULL` 谓词 ⇒ 红）；单批 > 5000 行时只删 5000 且不返回错误（批处理可续）；③ 破坏验证：往本仓任一 SQL 常量加 `UPDATE quant.orders` ⇒ 跨 schema 护栏红、还原复绿；④ `docs/db-schema.md` 的保留期一行与裁决一致并标注「暂定 + 复核条件」；⑤ 三条命令单仓绿。
 - **⑥ 边界**：本仓 schema 生命周期；订单 HTTP 面归 `SVC-BROKER-G1`（⛔），DTO 进契约归 `tellurion-contracts:CT-05`（⛔，与本单互为死锁的裁点已在 CT-05 写明）。
 
-### R10 · 幂等映射读失败的哨兵从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`（㉒ 已裁「现在修」）[P1] ⬜
+### R10 · 幂等映射读失败的哨兵从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`（㉒ 已裁「现在修」）[P1] ✅（2026-11-07）
 
 - **① 目标**：兑现第三轮裁决 ㉒ 的另一半——「**R10 现在修**：`internal/gateway/mock.go:358/415` 的映射读失败从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`，两处同口径 + 各一条用例」；这条裁决今天**没有条目承载**，且台账 `:94-101` 仍把它写成「待裁」（账实不符，本单落完同批订正）。
 - **② 上下文**：实测两处仍在——`internal/gateway/mock.go:358`（`CancelOrder` 路径里 `m.store.Load` 失败 → `fmt.Errorf("%w: %v", ErrChannelDown, err)`）与 `:415`（`QueryOrder` 同形）；正确哨兵 `ErrIdempotencyStoreUnavailable` 已存在（`internal/gateway/errors.go:36`）且在**发送前**的三处用对了（`mock.go:153/159/169`）⇒ 只有「读映射失败」这一类被错报成「通道断了」。为什么必须改：调用方看到 `channel_down` 会按「柜台侧不可达」处置（重试/等恢复），而真实情况是**本仓自己的幂等存储读不出来**，这一单可能已在柜台上；把「我存储坏了」报成「线路断了」是把诊断责任推给上游。
@@ -163,6 +163,14 @@ verified-by: G7（施工 ⑤）——X6c 开工条件判定为 ⛔ 阻塞 + 撤�
 - **④ 约束与非目标**：**不改** `found == true` 时的 `ErrUnknownState` 分支（那是正确行为，裁决没动它）；不改 R9 的三条 Mock/柜台行为差异（㉒ 明裁暂缓）；不动 `Disconnect()` 与真实断连路径的 `ErrChannelDown`（那些确实是通道断）；不改 DDL。
 - **⑤ 验收**：① 两条新用例先红（实现未改时断言拿不到 `ErrIdempotencyStoreUnavailable`）后绿；② **破坏验证**：把其中一处改回 `ErrChannelDown` ⇒ 对应用例红、还原复绿；③ `git grep -n 'ErrChannelDown' -- internal/gateway/mock.go` 的结果里 `:358`/`:415` 两条**不再存在**，其余（真断连路径）保持；④ `api-schema.md` 错误表与本仓实现逐字一致；⑤ 三条命令绿（`BROKER_TEST_DSN` 有库时集成腿一并跑，无库时如实记 skip）。
 - **⑥ 边界**：只改这一类错误归属；订单 HTTP 面（`SVC-BROKER-G1`）与 X6c 不在本单。
+
+> **施工记录（2026-11-07）**：
+> - **改动**：`internal/gateway/mock.go` 两处（`CancelOrder` 的映射读、`QueryOrder` 的映射读）由 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`，报文仍是 `%w: %v`（保留底层 `err` 上下文）；`found == true` 的 `unknown_state` 分支、`Disconnect()` / 发送前连接判定的 `channel_down` 一律未动。
+> - **用例**：`TestCancelOrderReportsStoreUnavailableWhenMappingReadFails` / `TestQueryOrderReportsStoreUnavailableWhenMappingReadFails`——注入 `Load` 返回错误的 store，断言错误链命中 `ErrIdempotencyStoreUnavailable` 且**不**命中 `ErrChannelDown`。
+> - **验收（真实输出）**：`go build ./...` → `BUILD_EXIT=0`；`go vet ./...` → `VET_EXIT=0`；`gofmt -l .` → 空输出；`go test ./... -count=1` → `TEST_EXIT=0`（4 个测试包全 ok）。
+> - **破坏验证**：把 `CancelOrder` 那一处改回 `ErrChannelDown` → `DESTROY_EXIT=1`，失败信息 `err = broker: channel down: pg down, want ErrIdempotencyStoreUnavailable`；逐行还原后复跑绿。
+> - **文档同步**：`docs/api-schema.md` §2（`idempotency_store_unavailable` 行补「含查单/撤单读映射失败」）+ §3（新增一条 R10 语义）、`docs/ARCHITECTURE.md` §9.7 R10 行改「已落」、`AGENTS.md` §1 状态行、本文件头部与 QT-45 施工记录（「R9 / R10 待裁」改为 R10 已落，R9 维持暂缓到 X6c）。
+> - **如实登记**：本机 `CGO_ENABLED=0`，`-race` 跑不了；PG 集成腿无 `BROKER_TEST_DSN` 时按设计 skip，本轮未起库。
 
 ### SVC-BROKER-G4 · 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036）[P1] ⬜
 

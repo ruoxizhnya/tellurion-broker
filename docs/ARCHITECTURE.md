@@ -221,7 +221,7 @@ type HealthChecker interface {
 | R7 | **kill-switch 的授权与审计** | `EmergencyFlatten` 绕过 T+1；XTP 侧无真实成交；谁有权触发未定 | 独立 `KillSwitch` port；调用方必须带运维身份与 reason；逐标的落审计（`bypassed_t1`）；与 QT-50 ④ 的鉴权矩阵合流 |
 | R8 | **密钥脱敏** | `Config.Password` `json:"-"` 但 `yaml:"password"`（`pkg/live/broker/xtp/xtp.go:119`） | 配置结构加 `String()`/日志脱敏；禁止把 `Config` 整体打进日志；密钥只从环境/密钥管理注入；加一条「日志里不出现 password」的测试 |
 | R9 | **Mock 与真实柜台的行为差异（F9，G7 取证登记）** | 三条实测：① 买入当日即 `AvailableQuantity = Quantity`，**T+1 不进 Mock**（`internal/gateway/mock.go:295`）；② 卖出超过可用数量**放行**、持仓减到 ≤0 直接删行（`mock.go:300-305`；`PlaceOrder` 只用 `lot.ValidateQuantity` 校申报单位，`mock.go:663`）；③ `Fill` 三项费用与 `AccountSnapshot.Fees` **恒零** | 待裁：是否收紧 ②——那是**契约行为变更**（要动 `api-schema.md` §2 的错误语义，可能一条 ADR），G7 不单方面改。收紧前必须如实读：Mock 全绿 ≠ 柜台绿；C 组（真实柜台最小闭环）的验收清单以这三条为来源（[`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) §8） |
-| R10 | **映射读失败报成 `channel_down`** | `QueryOrder`（`mock.go:415`）与本轮 `CancelOrder`（`mock.go:358`）都把映射读失败翻译成 `channel_down`；按 `api-schema.md` §2 的判据，准确哨兵是 `idempotency_store_unavailable` | 待裁的**诊断质量**问题，不是安全缺陷：现方向调用方处置是「熔断：停止下单 + 告警」，比真实原因更保守（不会造成发送）。裁决前两处口径**保持一致**，不要一处一处改 |
+| R10 | **映射读失败报成 `channel_down`** | `QueryOrder`（`mock.go:415`）与 `CancelOrder`（`mock.go:358`）原都把映射读失败翻译成 `channel_down`；按 `api-schema.md` §2 的判据，准确哨兵是 `idempotency_store_unavailable` | ✅ **已落（2026-11-07，第三轮裁决 ㉒「现在修」）**：两处同批改为 `ErrIdempotencyStoreUnavailable` 并保留底层 `err` 上下文，各一条用例（`TestCancelOrderReportsStoreUnavailableWhenMappingReadFails` / `TestQueryOrderReportsStoreUnavailableWhenMappingReadFails`）；`found == true` 的 `unknown_state` 分支与真断连路径的 `channel_down` 未动。破坏验证：把其中一处改回 `ErrChannelDown` ⇒ 对应用例红、还原复绿 |
 
 ### 9.8 实现现状（2026-10-25，施工 ① + ② + ③ + ④ ＋ G7 自审补正）
 

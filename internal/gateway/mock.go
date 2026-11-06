@@ -355,7 +355,9 @@ func (m *Mock) CancelOrder(ctx context.Context, req CancelRequest) (*OrderState,
 		// 柜台就是两笔。与 QueryOrder 同一口径（docs/api-schema.md §2、dataflow.md §4-1）。
 		if m.store != nil {
 			if _, found, err := m.store.Load(ctx, m.accountID, req.ClientOrderID); err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrChannelDown, err)
+				// 读映射失败 = 本仓自己的幂等存储不可用，不是「柜台侧不可达」：
+				// 报 channel_down 会让调用方按线路故障处置，而这一单可能已在柜台上。
+				return nil, fmt.Errorf("%w: %v", ErrIdempotencyStoreUnavailable, err)
 			} else if found {
 				return nil, fmt.Errorf("%w: client_order_id %q may already be at the counter; query the order, do not retry the cancel", ErrUnknownState, req.ClientOrderID)
 			}
@@ -412,7 +414,8 @@ func (m *Mock) QueryOrder(ctx context.Context, clientOrderID string) (*OrderStat
 	if m.store != nil {
 		_, found, err := m.store.Load(ctx, m.accountID, clientOrderID)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrChannelDown, err)
+			// 同 CancelOrder：映射读不出来是存储不可用，不是通道断（R10）。
+			return nil, fmt.Errorf("%w: %v", ErrIdempotencyStoreUnavailable, err)
 		}
 		if found {
 			return &OrderState{

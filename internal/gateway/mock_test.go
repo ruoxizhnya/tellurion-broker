@@ -321,6 +321,32 @@ func TestPlaceOrderFailsClosedWhenStoreLoadFails(t *testing.T) {
 	}
 }
 
+func TestCancelOrderReportsStoreUnavailableWhenMappingReadFails(t *testing.T) {
+	m, store, _ := newMock(t, MockOptions{Cash: 5000})
+	store.loadErr = errors.New("pg down")
+
+	_, err := m.CancelOrder(context.Background(), CancelRequest{ClientOrderID: "c-9"})
+	if !errors.Is(err, ErrIdempotencyStoreUnavailable) {
+		t.Fatalf("err = %v, want ErrIdempotencyStoreUnavailable", err)
+	}
+	if errors.Is(err, ErrChannelDown) {
+		t.Fatal("a broken idempotency store must not be reported as channel_down (R10)")
+	}
+}
+
+func TestQueryOrderReportsStoreUnavailableWhenMappingReadFails(t *testing.T) {
+	m, store, _ := newMock(t, MockOptions{Cash: 5000})
+	store.loadErr = errors.New("pg down")
+
+	_, err := m.QueryOrder(context.Background(), "c-9")
+	if !errors.Is(err, ErrIdempotencyStoreUnavailable) {
+		t.Fatalf("err = %v, want ErrIdempotencyStoreUnavailable", err)
+	}
+	if errors.Is(err, ErrChannelDown) {
+		t.Fatal("a broken idempotency store must not be reported as channel_down (R10)")
+	}
+}
+
 func TestPlaceOrderFailsClosedWhenReserveFails(t *testing.T) {
 	m, store, _ := newMock(t, MockOptions{Cash: 5000})
 	store.failWrite = func(n int) bool { return n == 1 }
