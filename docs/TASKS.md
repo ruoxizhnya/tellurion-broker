@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-07
-verified-by: R10 施工 —— 幂等映射读失败的哨兵改 `ErrIdempotencyStoreUnavailable`（两处 + 两腿 + 破坏验证）；此前 G7（施工 ⑤）X6c ⛔ 判定 + 撤单判据自审补正、R2 裁决、R5 申报数量纯函数
+verified-by: G2（代码已落，PG 集成腿未执行，记 🔶）+ R10 施工 —— 部分索引 / 90 天暂定保留期与进程内清理；R10 幂等映射读失败哨兵（两处 + 两腿 + 破坏验证）；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -146,7 +146,7 @@ verified-by: R10 施工 —— 幂等映射读失败的哨兵改 `ErrIdempotency
 
 > **⚠️ 开工前置（refactor-plan-review M5/M8，2026-10-20 登记）**：本表任何单开工前，必须先过 core `tellurion:docs/TASKS.md`「五、X 线」的**公共前置**两条：① 建仓/升格前先与 ADR-027 §2 对账（12 仓是上限/当前规划，不是承诺终态）；② 本仓设计文档先写「**接口对表**」小节（签名 + 错误语义 + 版本策略，模板见 `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1），**未对表不开工**。正文以彼处为准，此处只留指针、不镜像。
 
-### SVC-BROKER-G2 · 服务就绪门 G2：`broker.order_acks` 唯一 writer · 保留期与部分索引（裁决 ⑨）[P1] ⬜
+### SVC-BROKER-G2 · 服务就绪门 G2：`broker.order_acks` 唯一 writer · 保留期与部分索引（裁决 ⑨）[P1] 🔶（2026-11-07 代码已落；PG 集成腿未执行）
 
 - **① 目标**：`broker` schema 满足 ADR-036 §3 的 G2（自有 schema、迁移可重放、无跨 schema 写），并把第三轮裁决 **⑨** 已拍定的保留期与索引**落进 DDL 与作业**——这条裁决今天**没有任何条目承载**。
 - **② 上下文**：裁决 ⑨ 原文（本文件 `:14`）：「`broker.order_acks` 保留期 = **90 天**，只删 `ack IS NOT NULL`，先加 `(updated_at) WHERE ack IS NOT NULL` 部分索引，单批 ≤ 5000 行；90 天登记为**暂定假设**（柜台可查窗口未知）」；实测 `internal/ackstore/ddl.go` 的 `migrationStatements` 今天只有三条：`CREATE SCHEMA`、`CREATE TABLE broker.order_acks`（主键 `(account_id, client_order_id)`）、无其它索引 ⇒ **裁决的「先加部分索引」未落**；全仓生产代码无保留期删除语句（`DELETE FROM broker.order_acks` 只在 `internal/ackstore/pg_test.go:48` 的清理里出现）；台账 `:101` 与 `:109` 仍写「保留期未定（它要的是柜台可查窗口这个**事实**）」——这句与裁决 ⑨ 已被拍定为「90 天暂定」相冲突，属**账实不符**，本单第 ① 件事就是把它对齐。
@@ -154,6 +154,14 @@ verified-by: R10 施工 —— 幂等映射读失败的哨兵改 `ErrIdempotency
 - **④ 约束与非目标**：不改 `Reserve` / `Load` / `SaveAck` / `Durable` 四方法语义（ADR 0002 的幂等映射契约）；不动主键形状；不在真钱路径上跑清理（X6c ⛔）；不引调度框架（清理可以是进程内周期任务或运维脚本，但要写明选哪个及为什么）；不 `DROP` 表。
 - **⑤ 验收**：① `pg_indexes` 里出现该部分索引，且重放第二次执行后索引集与第一次逐位相同；② 清理用例三条：`ack IS NOT NULL` 且超 90 天 ⇒ 删；`ack IS NULL` 且超 90 天 ⇒ **不删**（这条是护栏，破坏验证：去掉 `ack IS NOT NULL` 谓词 ⇒ 红）；单批 > 5000 行时只删 5000 且不返回错误（批处理可续）；③ 破坏验证：往本仓任一 SQL 常量加 `UPDATE quant.orders` ⇒ 跨 schema 护栏红、还原复绿；④ `docs/db-schema.md` 的保留期一行与裁决一致并标注「暂定 + 复核条件」；⑤ 三条命令单仓绿。
 - **⑥ 边界**：本仓 schema 生命周期；订单 HTTP 面归 `SVC-BROKER-G1`（⛔），DTO 进契约归 `tellurion-contracts:CT-05`（⛔，与本单互为死锁的裁点已在 CT-05 写明）。
+
+> **施工记录（2026-11-07）**：
+> - **落点**：`internal/ackstore/ddl.go` 的 `migrationStatements` 新增部分索引 `order_acks_updated_at_acked_idx ON broker.order_acks (updated_at) WHERE ack IS NOT NULL`（走 `Migrate` 唯一路径、`IF NOT EXISTS` 幂等）；新增 `internal/ackstore/retention.go`（`DefaultRetention = 90 天`、`MaxCleanupBatch = 5000`、`CleanupAckedBatch` / `CleanupAcked`，只删 `ack IS NOT NULL AND updated_at < $1`）；`cmd/brokergateway/main.go` 在给了 `BROKER_DATABASE_DSN` 时改用 `PgStore` + `Migrate`，并启动**进程内 24h 周期清理**（选型理由写在 `runRetentionCleanup` 注释：单副本、连接池已在手、不引调度框架；多副本前须补互斥）。
+> - **验收（真实输出）**：`BUILD_EXIT=0` / `VET_EXIT=0` / `gofmt -l .` 空输出 / `TEST_EXIT=0`（4 个测试包全 ok）。
+> - **破坏验证（两条，均真实红后还原复绿）**：① 往 `migrationStatements` 加 `UPDATE quant.orders SET status = 'x'` → `TestSQLStatementsOnlyTouchBrokerSchema` 红（`DESTROY1_EXIT=1`，报文 `statement touches schema "quant"`）；② 去掉清理语句的 `ack IS NOT NULL` 谓词 → `TestCleanupStatementKeepsUnackedRows` 红（`DESTROY2_EXIT=1`）。
+> - **新增用例**：无库可跑的三条（`TestSQLStatementsOnlyTouchBrokerSchema` / `TestCleanupStatementKeepsUnackedRows` / `TestMigrationsIncludePartialIndex`）；需库的三条（`TestPgStore_CleanupDeletesOnlyAckedRowsPastRetention` / `TestPgStore_CleanupBatchCapsAtMaxAndCanContinue` / `TestPgStore_MigrateReplayKeepsIndexAndColumnSet`）按 `BROKER_TEST_DSN` 门控。
+> - **未执行（如实，不写成已完成）**：PG 集成腿本轮**未跑**——`docker version` 报 `dockerDesktopLinuxEngine` 管道不存在、`127.0.0.1:5446` 无监听、`BROKER_TEST_DSN` 未设 ⇒ 六条 PG 腿按设计 skip；因此 ⑤①「`pg_indexes` 里出现该部分索引且重放逐位相同」、⑤②「单批 >5000 只删 5000」、⑤③的**真库**那一半**都还没有真实输出**，本单据此记 🔶 而非 ✅。补齐条件：起临时 PG（约定端口 5446、容器名带 `tellurion-broker` 前缀）后 `BROKER_TEST_DSN=... go test ./internal/ackstore -count=1`。
+> - **文档同步**：`docs/db-schema.md` §1.1（索引进 DDL 块 + 不变量 4/5）、§5（90 天暂定 + 复核触发条件）、本文件头部与 AGENTS §1。
 
 ### R10 · 幂等映射读失败的哨兵从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`（㉒ 已裁「现在修」）[P1] ✅（2026-11-07）
 

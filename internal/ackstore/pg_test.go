@@ -167,6 +167,115 @@ func TestPgStore_ReservationWithoutAckStaysUnknown(t *testing.T) {
 	}
 }
 
+func TestPgStore_CleanupDeletesOnlyAckedRowsPastRetention(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	account := testAccount(t)
+	cleanupAccount(t, pool, account)
+
+	old := time.Now().UTC().Add(-120 * 24 * time.Hour)
+	fresh := time.Now().UTC()
+	insert := func(clientOrderID string, ack any, updatedAt time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO broker.order_acks
+				(account_id, client_order_id, request_fingerprint, ack, reserved_at, updated_at)
+			VALUES ($1, $2, 'fp', $3, $4, $4)`,
+			account, clientOrderID, ack, updatedAt); err != nil {
+			t.Fatalf("insert %s: %v", clientOrderID, err)
+		}
+	}
+	insert("old-acked", `{"status":"filled"}`, old)
+	insert("old-unacked", nil, old)
+	insert("fresh-acked", `{"status":"filled"}`, fresh)
+
+	if _, err := CleanupAckedBatch(ctx, pool, time.Now().UTC().Add(-DefaultRetention), MaxCleanupBatch); err != nil {
+		t.Fatalf("CleanupAckedBatch: %v", err)
+	}
+
+	var total, unacked int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE ack IS NULL)
+		FROM broker.order_acks WHERE account_id = $1`, account).Scan(&total, &unacked); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if total != 2 || unacked != 1 {
+		t.Fatalf("rows = %d (unacked %d), want 2 (unacked 1): the unacked row must survive", total, unacked)
+	}
+}
+
+func TestPgStore_CleanupBatchCapsAtMaxAndCanContinue(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	account := testAccount(t)
+	cleanupAccount(t, pool, account)
+
+	old := time.Now().UTC().Add(-120 * 24 * time.Hour)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO broker.order_acks
+			(account_id, client_order_id, request_fingerprint, ack, reserved_at, updated_at)
+		SELECT $1, 'c-' || g, 'fp', '{"status":"filled"}'::jsonb, $2, $2
+		FROM generate_series(1, $3) AS g`,
+		account, old, MaxCleanupBatch+1); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	first, err := CleanupAckedBatch(ctx, pool, time.Now().UTC().Add(-DefaultRetention), MaxCleanupBatch)
+	if err != nil {
+		t.Fatalf("first batch: %v", err)
+	}
+	if first != MaxCleanupBatch {
+		t.Fatalf("first batch deleted %d, want exactly %d", first, MaxCleanupBatch)
+	}
+	second, err := CleanupAckedBatch(ctx, pool, time.Now().UTC().Add(-DefaultRetention), MaxCleanupBatch)
+	if err != nil {
+		t.Fatalf("second batch: %v", err)
+	}
+	if second != 1 {
+		t.Fatalf("second batch deleted %d, want the remaining 1", second)
+	}
+}
+
+func TestPgStore_MigrateReplayKeepsIndexAndColumnSet(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+
+	fingerprint := func() []string {
+		t.Helper()
+		rows, err := pool.Query(ctx, `
+			SELECT indexname || ':' || indexdef FROM pg_indexes
+			WHERE schemaname = 'broker' AND tablename = 'order_acks'
+			ORDER BY indexname`)
+		if err != nil {
+			t.Fatalf("query indexes: %v", err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatalf("scan index: %v", err)
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+
+	before := fingerprint()
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("replay migrate: %v", err)
+	}
+	after := fingerprint()
+	if len(before) != len(after) {
+		t.Fatalf("index set changed on replay: %v -> %v", before, after)
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Fatalf("index %d changed on replay: %q -> %q", i, before[i], after[i])
+		}
+	}
+}
+
 func TestPgStore_ConflictReturnsOriginalFingerprint(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()

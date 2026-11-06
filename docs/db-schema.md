@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-23
-verified-by: R2 裁决 + `broker.order_acks` 落地（ADR 0002 / X6c 幂等持久化）
+last-verified: 2026-11-07
+verified-by: G2 施工 —— `broker.order_acks` 部分索引 + 90 天保留期清理落地；此前 R2 裁决 + `broker.order_acks` 落地（ADR 0002 / X6c 幂等持久化）
 ---
 
 # DB Schema — tellurion-broker
@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS broker.order_acks (
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (account_id, client_order_id)
 );
+
+-- 保留期清理的部分索引（第三轮裁决 ⑨，G2）：只索引已回执的行
+CREATE INDEX IF NOT EXISTS order_acks_updated_at_acked_idx
+    ON broker.order_acks (updated_at) WHERE ack IS NOT NULL;
 ```
 
 不变量：
@@ -50,7 +54,8 @@ CREATE TABLE IF NOT EXISTS broker.order_acks (
 1. **一行 = 一个 `(account_id, client_order_id)` 的发送权**。`INSERT ... ON CONFLICT DO NOTHING RETURNING` 决定谁拿到；没拿到的一方只能重放 / 报 unknown，不能发送。
 2. `ack IS NULL` 表示**已占位但结果未知**（发出途中崩溃）→ 加载到这种行必须 `unknown_state`，禁止重发。
 3. `request_fingerprint` 只由占位写入；写回执不得改写它（否则「同 ID 不同载荷」的判据会被洗掉）。
-4. 这张表**不是订单账本**：不存成交 / 持仓 / 费用；删行 = 允许重复下单，保留期必须按「不早于柜台可查窗口」定（当前不自动删，见 §5）。
+4. 这张表**不是订单账本**：不存成交 / 持仓 / 费用；删行 = 允许重复下单，保留期必须按「不早于柜台可查窗口」定（当前 **90 天暂定**，见 §5）。
+5. **保留期清理只删 `ack IS NOT NULL` 的行**（`internal/ackstore/retention.go`）：`ack IS NULL` 是「可能已发出而不知结果」的唯一证据，**永不被清理**；单批 ≤ 5000 行，批间是独立语句（放锁）。清理作业形态 = 网关进程内 24h 周期任务（给了 `BROKER_DATABASE_DSN` 才启用）。
 
 ## 2. 只读输入（不属于本仓，禁止写入）
 
@@ -83,5 +88,7 @@ CREATE TABLE IF NOT EXISTS broker.order_acks (
 ## 5. 待定
 
 - 订单 / 成交 / 持仓快照的最终归属未裁决（U2，集中登记于 `tellurion:docs/design/qt-decoupling/repo-inventory.md` §3.1——单仓只留此指针）；裁决前不建表。
-- `broker.order_acks` 的**保留期 / 归档策略**未定：当前不自动删除；删早了 = 允许重复下单，必须先确认柜台侧可查窗口再定阈值（ADR 0002 代价 5）。
+- `broker.order_acks` 的**保留期 = 90 天（暂定假设）**：只删 `ack IS NOT NULL` 且 `updated_at` 早于 90 天的行，先走部分索引 `order_acks_updated_at_acked_idx`，单批 ≤ 5000（第三轮裁决 ⑨，`internal/ackstore/retention.go`）。
+  - **为什么是暂定**：真正的判据是「柜台侧可查窗口」，那个事实今天未知；90 天是占位值。
+  - **复核触发条件**：柜台可查窗口一旦已知（X6c 的 P2 测试账号 / 柜台文档到手）⇒ 按 `min(柜台可查窗口, 现行值)` 重算 `ackstore.DefaultRetention`，同笔改本节与 ADR 0002。
 - 对账口径已从「逐笔成交」订正为「账户快照」（`QuerySettlement`）；真实 broker 侧与差异注入验收见 R3。

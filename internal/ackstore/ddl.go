@@ -30,4 +30,10 @@ var migrationStatements = []string{
 		updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
 		PRIMARY KEY (account_id, client_order_id)
 	)`,
+
+	// 保留期清理的部分索引（第三轮裁决 ⑨）：只索引已回执的行。
+	// 未回执的行（ack IS NULL）既不进索引也不被清理——它们是「可能已发出而
+	// 不知结果」的唯一证据，删掉等于制造重复下单。
+	`CREATE INDEX IF NOT EXISTS order_acks_updated_at_acked_idx
+		ON broker.order_acks (updated_at) WHERE ack IS NOT NULL`,
 }

@@ -236,6 +236,7 @@ type HealthChecker interface {
 | `xtp.go`（施工 ②） | `XTPTrader` fail-closed 骨架 + 装配闸：`NewXTPTrader` 构造期强制注入 `AckStore` / `SettlementQuerier` / `HealthChecker`（缺一或 `Acks.Durable()==false` → `ErrAssemblyIncomplete`，构造路径哨兵、非 wire code）；已装配后**所有**方法（含 `EmergencyFlatten`）恒 `ErrChannelDown`；`XTPConfig` 无密钥字段（R8） |
 | `ackstore/ddl.go`（施工 ③） | `broker.order_acks` 的唯一 DDL（幂等、无版本表）+ `Migrate` 的语句源 |
 | `ackstore/pg.go`（施工 ③） | `AckStore` 的 PG 实现：原子 `Reserve`（`INSERT ... ON CONFLICT DO NOTHING RETURNING`）、`SaveAck`（只更新已占位行）、`Load`、`Durable=true`、`Migrate` |
+| `ackstore/retention.go`（G2） | 保留期清理（裁决 ⑨）：`DefaultRetention=90 天（暂定）`、`MaxCleanupBatch=5000`、只删 `ack IS NOT NULL` 且超期的行（未回执行永不清）；`cmd/brokergateway` 在给了 `BROKER_DATABASE_DSN` 时启动进程内 24h 周期任务 |
 | `reconcile/reconcile.go`（施工 ②） | 快照口径对账纯函数：两侧共用 `AccountSnapshot`（F6），七类差异 × 三级严重度，容差沿用 core 迁出口径（现金 0.01 / 数量 0 / 市值 0.5% 仅数量相符时比 / 费用 0.01 / 时间漂移 60s），nil / 账户不符 / 重复标的 fail-loud，固定发射顺序，零差异返回空非 nil |
 | `lot/sizing.go`（施工 ④） | 申报数量纯函数（R5）：`Size`（目标权重 × 资金 / 持仓 ÷ 价格 → **向下取整**到申报单位；涨跌停带、超可用数量、超资金、0 手各自拒单）+ `ValidateQuantity`（显式数量的申报单位校验）；无 I/O、无时钟、无全局状态 |
 

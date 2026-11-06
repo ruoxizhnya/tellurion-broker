@@ -19,6 +19,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"tellurion-broker/internal/ackstore"
 	"tellurion-broker/internal/gateway"
 )
 
@@ -34,11 +37,27 @@ func main() {
 	cash := flag.Float64("cash", 100_000_000, "initial mock cash")
 	flag.Parse()
 
-	// G0 先装配 Mock；AckStore 用内存实现（不接真钱，XTP 装配闸要求 Durable=true）。
+	// 幂等映射：默认内存实现（不接真钱，XTP 装配闸要求 Durable=true）；
+	// 给了 BROKER_DATABASE_DSN 就用持久实现，并启动保留期清理（G2）。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var store gateway.AckStore = gateway.NewMemoryAckStore()
+	if dsn := os.Getenv("BROKER_DATABASE_DSN"); dsn != "" {
+		pool, err := connectAndMigrate(ctx, dsn)
+		if err != nil {
+			log.Fatalf("brokergateway: idempotency store: %v", err)
+		}
+		defer pool.Close()
+		store = ackstore.NewPgStore(pool)
+		go runRetentionCleanup(ctx, pool)
+		log.Printf("brokergateway: idempotency store = postgres, acked retention = %v", ackstore.DefaultRetention)
+	}
+
 	mock := gateway.NewMock(gateway.MockOptions{
 		AccountID: *accountID,
 		Cash:      *cash,
-		Store:     gateway.NewMemoryAckStore(),
+		Store:     store,
 	})
 
 	const (
@@ -72,9 +91,6 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -85,5 +101,54 @@ func main() {
 	log.Printf("brokergateway: listening on %s (mock account=%s, order HTTP API = G1)", *addr, *accountID)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("brokergateway: listen: %v", err)
+	}
+}
+
+// connectAndMigrate 建池并执行本仓唯一的 DDL（幂等、无版本表）。
+func connectAndMigrate(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(connectCtx, dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.Ping(connectCtx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	migrateCtx, cancelMigrate := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelMigrate()
+	if err := ackstore.Migrate(migrateCtx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return pool, nil
+}
+
+// cleanupInterval 是进程内保留期清理的周期（裁决 ⑨：只删已回执行，单批 ≤ 5000）。
+const cleanupInterval = 24 * time.Hour
+
+// runRetentionCleanup 是本仓选定的清理作业形态：**进程内周期任务**。
+//
+// 理由：本仓是单副本服务、PG 连接池已在手、不需要额外调度框架与多副本互斥；
+// 首次执行在启动后一个周期（不在启动时扫表，避免拖慢就绪）。若将来多副本，
+// 需先补分布式互斥再复制本作业——删除是幂等的，但并发跑会白做重复扫描。
+func runRetentionCleanup(ctx context.Context, pool *pgxpool.Pool) {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := ackstore.CleanupAcked(ctx, pool, ackstore.DefaultRetention)
+			if err != nil {
+				log.Printf("brokergateway: retention cleanup failed: %v", err)
+				continue
+			}
+			if n > 0 {
+				log.Printf("brokergateway: retention cleanup deleted %d acked rows", n)
+			}
+		}
 	}
 }
