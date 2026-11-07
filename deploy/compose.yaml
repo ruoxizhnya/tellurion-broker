@@ -1,6 +1,6 @@
 # tellurion-broker · 单仓本地运行（ADR-036 G0，Mock）
 # 用法：docker compose -f deploy/compose.yaml up --build
-# G0 只暴露 /healthz 与 /version；订单 HTTP 面归 SVC-BROKER-G1。
+# G0 暴露 /healthz 与 /version；订单 HTTP 面已随 SVC-BROKER-G1 落在 /api/broker/。
 name: tellurion-broker
 
 services:
@@ -10,6 +10,11 @@ services:
       dockerfile: Dockerfile
     image: tellurion-broker:dev
     command: ["-addr", "0.0.0.0:8091", "-account-id", "mock", "-cash", "100000000"]
+    # 凭证来源（QT-77）：写侧鉴权已随 `SVC-BROKER-G1` 落地——`Authorization:
+    # Bearer $BROKER_SERVICE_TOKEN` 常量时间比对（**不是 JWT**，本仓不引 kit
+    # 鉴权）；变量未设 = 写侧关闭（`503 writes_disabled`），不是不校验。
+    # 本文件不注入它（Mock 本地形态）；token 由调用方部署时提供。口径见
+    # tellurion:docs/SPEC.md 的「服务间凭证」节。
     ports:
       - "127.0.0.1:8091:8091"
     healthcheck:
