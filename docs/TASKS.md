@@ -156,7 +156,14 @@ verified-by: G4 🔶（失败语义六类 / 就绪口径 / runbook / 内存演�
 
 > **⚠️ 开工前置（refactor-plan-review M5/M8，2026-10-20 登记）**：本表任何单开工前，必须先过 core `tellurion:docs/TASKS.md`「五、X 线」的**公共前置**两条：① 建仓/升格前先与 ADR-027 §2 对账（12 仓是上限/当前规划，不是承诺终态）；② 本仓设计文档先写「**接口对表**」小节（签名 + 错误语义 + 版本策略，模板见 `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1），**未对表不开工**。正文以彼处为准，此处只留指针、不镜像。
 
-### SVC-BROKER-G2 · 服务就绪门 G2：`broker.order_acks` 唯一 writer · 保留期与部分索引（裁决 ⑨）[P1] 🔶（2026-11-07 代码已落；PG 集成腿未执行）
+### SVC-BROKER-G2 · 服务就绪门 G2：`broker.order_acks` 唯一 writer · 保留期与部分索引（裁决 ⑨）[P1] ✅（2026-11-07 PG 集成腿补跑通过）
+
+> **2026-11-07 PG 集成腿补跑（✅）**：便携 PostgreSQL 16.2 @ `127.0.0.1:55432`；
+> `BROKER_TEST_DSN='postgres://postgres@127.0.0.1:55432/tellurion_broker_test?sslmode=disable' go test ./internal/ackstore -run TestPgStore_ -v -count=1`
+> → 9 条全 `PASS`、退出码 0，含 `TestPgStore_MigrateReplayKeepsIndexAndColumnSet`（部分索引出现在 `pg_indexes` 且重放索引集一致）、
+> `TestPgStore_CleanupDeletesOnlyAckedRowsPastRetention`、`TestPgStore_CleanupBatchCapsAtMaxAndCanContinue`（单批 ≤5000）、
+> `TestPgStore_ReservationWithoutAckStaysUnknown`（`ack IS NULL` 不删）。⑤①~⑤⑤ 均有真实输出。
+> 环境口径：端口由 `BROKER_TEST_DSN` 注入，测试库约定里的 5446 未改。
 
 - **① 目标**：`broker` schema 满足 ADR-036 §3 的 G2（自有 schema、迁移可重放、无跨 schema 写），并把第三轮裁决 **⑨** 已拍定的保留期与索引**落进 DDL 与作业**——这条裁决今天**没有任何条目承载**。
 - **② 上下文**：裁决 ⑨ 原文（本文件 `:14`）：「`broker.order_acks` 保留期 = **90 天**，只删 `ack IS NOT NULL`，先加 `(updated_at) WHERE ack IS NOT NULL` 部分索引，单批 ≤ 5000 行；90 天登记为**暂定假设**（柜台可查窗口未知）」；实测 `internal/ackstore/ddl.go` 的 `migrationStatements` 今天只有三条：`CREATE SCHEMA`、`CREATE TABLE broker.order_acks`（主键 `(account_id, client_order_id)`）、无其它索引 ⇒ **裁决的「先加部分索引」未落**；全仓生产代码无保留期删除语句（`DELETE FROM broker.order_acks` 只在 `internal/ackstore/pg_test.go:48` 的清理里出现）；台账 `:101` 与 `:109` 仍写「保留期未定（它要的是柜台可查窗口这个**事实**）」——这句与裁决 ⑨ 已被拍定为「90 天暂定」相冲突，属**账实不符**，本单第 ① 件事就是把它对齐。
