@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-07
-verified-by: G4 🔶（失败语义六类 / 就绪口径 / runbook / 内存演练已落，真 PG 演练腿未执行）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 🔶（代码已落，PG 集成腿未执行）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
+verified-by: G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -111,7 +111,7 @@ verified-by: G4 🔶（失败语义六类 / 就绪口径 / runbook / 内存演�
 > `docs/README.md` §1/§2 导航、`AGENTS.md` §1 状态。
 > **未落项（如实，不写成已完成）**：X6c 全量适配器仍 ⛔（P1~P5 任一不满足即不动代码，触发条件见该文 §6）；
 > R10 已落（2026-11-07，见本文件 R10 单）；R9 维持「暂缓到 X6c」（㉒ 原文如此）；`broker.order_acks` 保留期 = 90 天暂定（裁决 ⑨，DDL 与清理作业归 `SVC-BROKER-G2`）；
-> 对账留痕进 risk（X3）未接；core 旧 `LiveTrader` / `Broker` 退役（R4，跨仓腿）；**PG 集成腿本轮未跑**（服务未起）。
+> 对账留痕进 risk（X3）未接；core 旧 `LiveTrader` / `Broker` 退役（R4，跨仓腿）；**PG 集成腿已于 2026-11-07 真跑**（9 条全 PASS，见 SVC-BROKER-G2/G4 记录）。
 >
 > **施工记录（2026-10-24，施工 ④）**：**R5 申报数量纯函数**落地，`go build/vet/test -count=1` 全绿（新增 `internal/gateway/lot`；用例覆盖 0 手 / 最小单位取整 / 超可用数量 / 涨跌停 / 越界价 / 非法入参）——
 > ① `Size(Input)`：目标权重 × 资金或可用数量 ÷ 价格，**向下取整**到申报单位（`LotSize`，0 = 100）；输出股数 / 手数与拒单原因码（`zero_quantity` / `insufficient_capital` / `exceeds_available_quantity` / `price_above_limit_up` / `price_below_limit_down` / `invalid_input`）。**不缩量、不抬量**：超可用 / 超资金 / 不足一手一律拒单，把定仓错误暴露在调用方；被拒结果不带数量（防止"顺手"把拒单当订单发出去）。
@@ -177,7 +177,7 @@ verified-by: G4 🔶（失败语义六类 / 就绪口径 / runbook / 内存演�
 > - **验收（真实输出）**：`BUILD_EXIT=0` / `VET_EXIT=0` / `gofmt -l .` 空输出 / `TEST_EXIT=0`（4 个测试包全 ok）。
 > - **破坏验证（两条，均真实红后还原复绿）**：① 往 `migrationStatements` 加 `UPDATE quant.orders SET status = 'x'` → `TestSQLStatementsOnlyTouchBrokerSchema` 红（`DESTROY1_EXIT=1`，报文 `statement touches schema "quant"`）；② 去掉清理语句的 `ack IS NOT NULL` 谓词 → `TestCleanupStatementKeepsUnackedRows` 红（`DESTROY2_EXIT=1`）。
 > - **新增用例**：无库可跑的三条（`TestSQLStatementsOnlyTouchBrokerSchema` / `TestCleanupStatementKeepsUnackedRows` / `TestMigrationsIncludePartialIndex`）；需库的三条（`TestPgStore_CleanupDeletesOnlyAckedRowsPastRetention` / `TestPgStore_CleanupBatchCapsAtMaxAndCanContinue` / `TestPgStore_MigrateReplayKeepsIndexAndColumnSet`）按 `BROKER_TEST_DSN` 门控。
-> - **未执行（如实，不写成已完成）**：PG 集成腿本轮**未跑**——`docker version` 报 `dockerDesktopLinuxEngine` 管道不存在、`127.0.0.1:5446` 无监听、`BROKER_TEST_DSN` 未设 ⇒ 六条 PG 腿按设计 skip；因此 ⑤①「`pg_indexes` 里出现该部分索引且重放逐位相同」、⑤②「单批 >5000 只删 5000」、⑤③的**真库**那一半**都还没有真实输出**，本单据此记 🔶 而非 ✅。补齐条件：起临时 PG（约定端口 5446、容器名带 `tellurion-broker` 前缀）后 `BROKER_TEST_DSN=... go test ./internal/ackstore -count=1`。
+> - **未执行（当日早先状态，已被晚间真库记录替代）**：PG 集成腿当时**未跑**——Docker 管道不存在、`127.0.0.1:5446` 无监听、`BROKER_TEST_DSN` 未设 ⇒ 六条 PG 腿按设计 skip；⑤①②③ 的真库输出当时缺失。**2026-11-07 晚已补齐**：`BROKER_TEST_DSN=postgres://postgres@127.0.0.1:55432/tellurion_broker_test?sslmode=disable` 下 9 条 PG 腿全 `PASS`（含 `TestPgStore_MigrateReplayKeepsIndexAndColumnSet`、`TestPgStore_CleanupBatchCapsAtMaxAndCanContinue`、`TestPgStore_CleanupDeletesOnlyAckedRowsPastRetention`）。
 > - **文档同步**：`docs/db-schema.md` §1.1（索引进 DDL 块 + 不变量 4/5）、§5（90 天暂定 + 复核触发条件）、本文件头部与 AGENTS §1。
 
 ### R10 · 幂等映射读失败的哨兵从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`（㉒ 已裁「现在修」）[P1] ✅（2026-11-07）
@@ -197,7 +197,7 @@ verified-by: G4 🔶（失败语义六类 / 就绪口径 / runbook / 内存演�
 > - **文档同步**：`docs/api-schema.md` §2（`idempotency_store_unavailable` 行补「含查单/撤单读映射失败」）+ §3（新增一条 R10 语义）、`docs/ARCHITECTURE.md` §9.7 R10 行改「已落」、`AGENTS.md` §1 状态行、本文件头部与 QT-45 施工记录（「R9 / R10 待裁」改为 R10 已落，R9 维持暂缓到 X6c）。
 > - **如实登记**：本机 `CGO_ENABLED=0`，`-race` 跑不了；PG 集成腿无 `BROKER_TEST_DSN` 时按设计 skip，本轮未起库。
 
-### SVC-BROKER-G4 · 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036）[P1] 🔶（2026-11-07 施工：①~⑥ 文档与内存演练已落；真 PG 演练腿未执行，不标 ✅）
+### SVC-BROKER-G4 · 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036）[P1] ✅（2026-11-07 真 PG 演练腿补齐）
 
 - **① 目标**：把「通道什么时候算不可用、不可用时对外说什么、谁来判断」写成文档并演练一次——本仓是全系统唯一**直接面对钱**的边界，失败语义含糊的代价与其它五仓不同量级。
 - **② 上下文**：`cmd/brokergateway` 已有 `/healthz` + `/version`（G0 ✅，`:8091`）；`XTPTrader` 是 fail-closed 骨架（构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一、或 `Acks.Durable()==false` 即拒绝；装配后所有方法恒 `channel_down`，**零 fake success**）——这个姿势是对的，本单不改行为、只把它变成可核对的文档与演练；**`/readyz` 全 workspace 0 命中**（gateway 没有监听业务端口，「就绪」到底指什么必须先回答）；PG 只用于幂等映射，映射不可用与柜台不可用**必须是两个码**（R10 就是这条的具体化）；无 runbook（全 workspace `runbook` 只在 ADR-036 正文）；X6c 的四份 `docs/x6c-xtp-readiness.md` 有 P1~P5 前置，但「运维怎么判断现在能不能开」没有一页纸。
@@ -211,10 +211,17 @@ verified-by: G4 🔶（失败语义六类 / 就绪口径 / runbook / 内存演�
 > - **就绪口径**：选「不引入 `/readyz`；`/healthz` 唯一探针，就绪 = 装配闸通过」，理由（单监听面 / 构造期闸 / PG 故障是业务错误不是探针失败 / `Durable()` 是静态判据）写在 `api-schema.md` §1.6 与 `runbook.md` §1，两处一致；未改 fail-closed 行为。
 > - **KillSwitch**：`runbook.md` §7 写触发权限、命令、`sold`/`skipped` 读法、解除三条件、留痕（响应 JSON + `reason` + 事故单；本仓不持久化审计，R7 缺口如实写，不声称"网关已留痕"）。
 > - **runbook**：新建 `docs/runbook.md`，含起停 / DSN fail-closed / 装配闸离线核对 / 幂等映射 SQL 与 `BROKER_TEST_DSN` 姿势 / `unknown_state` 五步排查 / reconcile 快照口径 / 演练 / 永久前置 / 执行覆盖表；本次可执行命令均已真跑（`:18091` 起停、`/healthz`、下单、查单、404、`emergency-flatten`、无库 DSN 启动退出 1）。
-> - **演练**：`internal/httpapi/g4_drill_test.go`（httptest + 可切换故障 store）→ 故障期 `503 idempotency_store_unavailable`（无 `broker_order_id` / `status=accepted`，`QueryFills=0`）→ 恢复后同 ID `200 filled`；`DRILL_EXIT=0`。真 PG 腿**未执行**（本机无 PG、Docker 不可用、无 DSN）。
-> - **永久前置**：`api-schema.md` §6 + `runbook.md` §9 写明「未接真钱」是永久 G4 前置（X6c ⛔ P1~P5），开真钱前 G1/G2/G3/G4 必须全绿；当前 G1 ✅ / G2 🔶 / G3 ⛔ / G4 🔶。
+> - **演练**：`internal/httpapi/g4_drill_test.go`（httptest + 可切换故障 store）→ 故障期 `503 idempotency_store_unavailable`（无 `broker_order_id` / `status=accepted`，`QueryFills=0`）→ 恢复后同 ID `200 filled`；`DRILL_EXIT=0`。
+> - **真 PG 演练（2026-11-07 晚补齐，本单翻 ✅）**：便携 PostgreSQL 16.2 @ `127.0.0.1:55432`（库 `tellurion_broker_test`），`cmd/brokergateway` 以 `BROKER_DATABASE_DSN` + `BROKER_SERVICE_TOKEN=secret` 起在 `:18091`：
+>   - `GET /healthz` → `200 {"status":"ok"}`；下单 `g4-real-1` → `200 {"broker_order_id":"MOCK-000001","status":"accepted"}`。
+>   - `pg_ctl stop -m fast`（`PG_STOP=0`）后下单 `g4-real-2` → **`503 {"code":"idempotency_store_unavailable",…}`**，响应无 `broker_order_id`、无 `status":"accepted"`；同刻 `/healthz` 仍 `200`（就绪口径：`/healthz` 判装配闸，PG 故障走业务码）。
+>   - `pg_ctl start`（`PG_RESTART=0`）后用**同一个** `client_order_id=g4-real-2` 重投 → `200 {"broker_order_id":"MOCK-000002","status":"accepted"}`；`GET /api/broker/orders/g4-real-2` → `200`。
+>   - 映射表核对（无 `psql`，用 `postgres --single`）：`broker.order_acks` 两行均为 `acked=true`，`ack->>'broker_order_id'` = `MOCK-000001` / `MOCK-000002`。
+>   - `BROKER_TEST_DSN=… go test ./internal/ackstore -run TestPgStore_ -v -count=1` → `PG_LEG_EXIT=0`，9 条全 PASS；`gofmt -l .` 空、`go build`/`go vet`/`go test ./... -count=1` 均 0。
+> - **仍未执行（如实）**：`-race`（`CGO_ENABLED=0` 跑不了）、Docker 容器腿（引擎不可用）——两者都不在本单 ⑤ 验收内。
+> - **永久前置**：`api-schema.md` §6 + `runbook.md` §9 写明「未接真钱」是永久 G4 前置（X6c ⛔ P1~P5），开真钱前 G1/G2/G3/G4 必须全绿；截至 2026-11-07 晚：G1 ✅ / G2 ✅ / G3 ⛔（等 QT-51）/ G4 ✅。
 > - **门禁（真实）**：`gofmt -l .` 无输出（`GOFMT_EXIT=0`）；`go build ./...` 0；`go vet ./...` 0；`go test ./... -count=1` 0（ackstore / gateway / lot / httpapi / reconcile 全 `ok`）。
-> - **未执行**：真 PG 停库演练、`psql` 映射查询、`BROKER_TEST_DSN` 集成腿、`-race`（`CGO_ENABLED=0`）、Docker。因此本单标 🔶，不标 ✅。
+> - **未执行项（当日早先状态，晚间已补齐）**：真 PG 停库演练、`psql` 映射查询（改用 `postgres --single`）、`BROKER_TEST_DSN` 集成腿——三者见上方「真 PG 演练」记录。**仍未执行**：`-race`（`CGO_ENABLED=0`）、Docker（引擎不可用）。
 
 ## 施工序（候选单，开工前必须展开成六字段）
 

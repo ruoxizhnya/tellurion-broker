@@ -246,6 +246,6 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 
 > **本仓今天未接真钱。** `X6c` 是 ⛔，不是待办：缺 P1~P5（SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗，见 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) §4）。这条不随 G4 完成而解除。
 
-**永久闸门**：开真钱之前，`SVC-BROKER-G1`（订单 / 查询 / 对账 HTTP 面）、`SVC-BROKER-G2`（幂等映射保留期）、`SVC-BROKER-G3`（core 切读与旧实现退役）、`SVC-BROKER-G4`（失败语义 / 就绪 / 熔断 / runbook / 演练）**必须全部 ✅**；任一 🔶 / ⛔ / ⬜ 都不得开真钱，也不得以「先跑小单」绕过。截至 2026-11-07：G1 ✅、G2 🔶（PG 集成腿未执行）、G3 ⛔（等 QT-51）、G4 🔶（真 PG 演练腿未执行）。
+**永久闸门**：开真钱之前，`SVC-BROKER-G1`（订单 / 查询 / 对账 HTTP 面）、`SVC-BROKER-G2`（幂等映射保留期）、`SVC-BROKER-G3`（core 切读与旧实现退役）、`SVC-BROKER-G4`（失败语义 / 就绪 / 熔断 / runbook / 演练）**必须全部 ✅**；任一 🔶 / ⛔ / ⬜ 都不得开真钱，也不得以「先跑小单」绕过。截至 2026-11-07 晚：G1 ✅、G2 ✅（PG 集成腿 9 条真跑）、G3 ⛔（等 QT-51）、G4 ✅（真 PG 停库→恢复演练完成）。
 
 机械判据：本仓没有 XTP SDK 链路、`XTPTrader` 恒 `channel_down`、`cmd/brokergateway` 只装配 Mock。任何「已经可以接真钱」的说法都必须先让上面四项全绿，并另立 ADR 记录切换判据。运维视角的同一闸门见 [`runbook.md`](runbook.md) §9。

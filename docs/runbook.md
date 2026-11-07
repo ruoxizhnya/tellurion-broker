@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-07
-verified-by: G4 施工（失败语义 / 就绪口径 / KillSwitch 姿态 / 演练；PG 腿未执行）
+verified-by: G4 施工（失败语义 / 就绪口径 / KillSwitch 姿态 / 演练；真 PG 腿 2026-11-07 补跑）
 ---
 
 # Runbook — tellurion-broker 网关运维
@@ -111,16 +111,32 @@ WHERE account_id = '<account>'
 | `has_ack = false` | 只有占位、没有回执 | 这一单**可能已经发出**；重放会得到 `unknown_state`，先查单，**严禁换 ID 重发** |
 | `has_ack = true` | 已有回执 | 重放返回原回执（`idempotent_replay=true`）；被拒过的单重放仍返回同一个 error |
 
-PG 集成腿的姿势（**本机未执行**：无 PG、Docker 不可用、`5446` 无监听）：
+PG 集成腿的姿势（**2026-11-07 已在便携 PostgreSQL 16.2 @ `127.0.0.1:55432` 上执行**）：
 
 ```powershell
-$env:BROKER_TEST_DSN = 'postgres://postgres@127.0.0.1:5446/tellurion_broker_test?sslmode=disable'
+$env:BROKER_TEST_DSN = 'postgres://postgres@127.0.0.1:55432/tellurion_broker_test?sslmode=disable'
 go test ./internal/ackstore -count=1 -v
+```
+
+真输出（`PG_LEG_EXIT=0`，9 条全 PASS）：
+
+```
+--- PASS: TestPgStore_MigrateIsIdempotent (0.04s)
+--- PASS: TestPgStore_ReserveIsAtomic (0.27s)
+--- PASS: TestPgStore_AckSurvivesAnotherStoreInstance (0.08s)
+--- PASS: TestPgStore_SaveAckRequiresReservation (0.04s)
+--- PASS: TestPgStore_ReservationWithoutAckStaysUnknown (0.04s)
+--- PASS: TestPgStore_CleanupDeletesOnlyAckedRowsPastRetention (0.04s)
+--- PASS: TestPgStore_CleanupBatchCapsAtMaxAndCanContinue (0.06s)
+--- PASS: TestPgStore_MigrateReplayKeepsIndexAndColumnSet (0.04s)
+--- PASS: TestPgStore_ConflictReturnsOriginalFingerprint (0.04s)
 ```
 
 - `BROKER_TEST_DSN` **未设**：PG 用例按设计 `SKIP`（默认 CI / 无库本机）。
 - 设了但连不上：用例 **fail-loud**（不是 skip），这是刻意的——有 DSN 就代表“应当能跑”。
-- 查询命令 `psql "$env:BROKER_TEST_DSN" -c "SELECT ..."` 本轮**未执行**（本机无 `psql`/无 PG）；上表 SQL 是给现场用的。
+- 映射查询：本机无 `psql`，2026-11-07 改用 `postgres --single -D <data> tellurion_broker_test` 执行同一 SELECT，
+  真结果两条：`mock/g4-real-1 acked=true ack->>'broker_order_id'="MOCK-000001"`、`mock/g4-real-2 acked=true … "MOCK-000002"`。
+  现场有 `psql` 时仍按上面的 `psql "$env:BROKER_TEST_DSN" -c "SELECT ..."` 执行。
 
 ## 5. `unknown_state` 排查顺序（严格按序，不要跳）
 
@@ -217,16 +233,31 @@ ok  	tellurion-broker/internal/httpapi	0.050s
 
 演练断言：故障期 `503` + `idempotency_store_unavailable`；响应里没有 `broker_order_id` / `status=accepted` 这种成功形状；`QueryFills` 为 0（**没有发送**）；存储恢复后用**同一个** `client_order_id` 下单成功。这是 `httptest` 真跑，不是 mock 断言。
 
-### 8.2 真 PG 腿（未执行）
+### 8.2 真 PG 腿（2026-11-07 已执行）
 
-- **未执行**：本机无 PG、Docker 不可用、`BROKER_TEST_DSN` 未设/`127.0.0.1:5446` 无监听；`CGO_ENABLED=0` 也跑不了 `-race`。
-- 有库后的动作：起临时 PG（约定 `5446`）→ `BROKER_TEST_DSN=... go test ./internal/ackstore -count=1` → 停 PG（或切断连接）→ 通过 HTTP 下单，断言 `503 idempotency_store_unavailable` 且无成交 → 恢复 PG → 用**同一个** `client_order_id` 重试成功。预期与前一条一致，但输入换成真实 `PgStore`。
+- 库：便携 PostgreSQL 16.2 @ `127.0.0.1:55432`，库 `tellurion_broker_test`；网关 `cmd/brokergateway` 以
+  `BROKER_DATABASE_DSN` + `BROKER_SERVICE_TOKEN=secret` 启动（`:18091`）。
+- **执行顺序与真输出**：
+
+```
+HEALTHZ=200                      {"status":"ok"}
+ORDER_UP=200                     {"client_order_id":"g4-real-1","broker_order_id":"MOCK-000001","status":"accepted","idempotent_replay":false,…}
+PG_STOP=0                        （pg_ctl stop -m fast）
+ORDER_PG_DOWN=503                {"code":"idempotency_store_unavailable","message":"broker: idempotency store unavailable: failed to connect to `user=postgres database=tellurion_broker_test`: 127.0.0.1:55432 … actively refused it."}
+HEALTHZ_DOWN=200                 {"status":"ok"}      （假死口径：/healthz 只判装配闸，PG 故障走业务错误码）
+PG_RESTART=0
+ORDER_RECOVERED=200              {"client_order_id":"g4-real-2","broker_order_id":"MOCK-000002","status":"accepted",…}
+QUERY=200                        {"client_order_id":"g4-real-2","broker_order_id":"MOCK-000002","status":"accepted","remaining_quantity":100,…}
+```
+
+- 故障期响应里**没有** `broker_order_id` / `status=accepted` 的成功形状；恢复后用**同一个** `client_order_id` 重试成功。
+- `-race` 仍 `未执行`（`CGO_ENABLED=0` 跑不了）；Docker 仍未执行（引擎不可用）。
 
 ## 9. 永久前置：未接真钱（G4 的前置，不是待办）
 
 - **本仓今天不接真钱。** `X6c` 是 ⛔，不是“漏做的一步”：缺 P1~P5（SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗，见 `x6c-xtp-readiness.md` §4）。这条不随 G4 完成而解除。
 - **开真钱之前，`SVC-BROKER-G1` / `G2` / `G3` / `G4` 必须全部 ✅**；任一 🔶 / ⛔ / ⬜ 都不得开真钱，也不得以“先跑小单”绕过。
-- 截至 2026-11-07：G1 ✅、G2 🔶（PG 集成腿未执行）、G3 ⛔（等 QT-51）、G4 🔶（本文与演练已落，真 PG 演练腿未执行）。
+- 截至 2026-11-07：G1 ✅、G2 ✅（PG 集成腿已跑）、G3 ⛔（等 QT-51）、G4 ✅（真 PG 演练腿已补跑）。
 - 机械判据：没有 XTP SDK 链路、`XTPTrader` 恒 `channel_down`、`cmd/brokergateway` 只装配 Mock。任何“已经可以接真钱”的说法都必须先让四项全绿并另立 ADR。
 
 ## 10. 本次执行覆盖（2026-11-07）
@@ -236,9 +267,9 @@ ok  	tellurion-broker/internal/httpapi	0.050s
 | 2 | `go build ./cmd/brokergateway` + 起停 `:18091` | `BUILD_EXIT=0`；`/healthz` 200；已停止 |
 | 2 | 不存在的 PG DSN 启动 | `PG_START_EXIT=1`（fail-closed，拒绝降级） |
 | 3 | `go test ./internal/gateway -run TestNewXTPTrader_GateRejects... -v` | `EXIT=0`，四条拒绝原因已打印 |
-| 4 | `go test ./internal/ackstore -v`（无 DSN） | `EXIT=0`，PG 9 条 `SKIP`；**真库查询未执行** |
+| 4 | `go test ./internal/ackstore -v`（`BROKER_TEST_DSN` @ 55432） | `EXIT=0`，PG 9 条全 PASS；映射查询用 `postgres --single` 执行（两条 acked 行） |
 | 5 | `/healthz`、`GET /orders/...`、缺失 ID 404 | 200 / 200 / 404，输出见 §5 与提交记录 |
 | 6 | `go test ./internal/reconcile -v` | `EXIT=0`，七类差异注入全 PASS |
 | 7 | `POST /api/broker/emergency-flatten`（Mock 空仓） | 200，`sold=[] skipped=[] sold_total=0` |
 | 8.1 | `go test ./internal/httpapi -run TestDrill... -v` | `EXIT=0`，`503 idempotency_store_unavailable` → 恢复后 200 |
-| 8.2 | 真 PG 停库演练 | **未执行** |
+| 8.2 | 真 PG 停库演练 | **已执行**：200 → 停库 503 `idempotency_store_unavailable` → 恢复 200（同一 ID 重投成功） |
