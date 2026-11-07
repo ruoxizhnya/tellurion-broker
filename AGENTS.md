@@ -6,7 +6,7 @@
 
 交易通道网关：`XTPTrader` / `MockTrader` = 同一 port 的两个实现。**落地前必须先有对账方案**。
 
-**状态**：已启动（2026-10-24 施工 ④ ＋ 2026-10-25 施工 ⑤ = G7）——X6a 四 port + 内存 `Mock` 已落 `internal/gateway`；X6b 对账纯函数（快照口径 + 差异注入验收）已落 `internal/reconcile`；X6c 装配闸 + fail-closed 骨架 + **持久幂等映射 `broker.order_acks`**（`internal/ackstore`，ADR 0002）已落；R5 申报数量纯函数（`internal/gateway/lot`）已落并让 Mock 共用；**X6c 全量适配器 ⛔ 阻塞**（G7 判定：本仓 / core / 本机 C 工具链 / CI **四处都没有 SDK**，缺的是开工前置 P1~P5，不是漏做的一步——取证、剩余范围与触发条件见 `docs/x6c-xtp-readiness.md`）；R10（映射读失败报成 `channel_down`）已落（2026-11-07），R9 维持暂缓到 X6c；`broker.order_acks` 的 G2（部分索引 + **90 天暂定**保留期，只删 `ack IS NOT NULL`，单批 ≤ 5000，进程内 24h 清理）代码已落、PG 集成腿未执行（记 🔶）；G1 订单/查询/对账 HTTP 面已落（`/api/broker`，写侧 `BROKER_SERVICE_TOKEN`，未设即关闭写面），core 侧消费仍归 G3（⛔ 等 QT-51）；**X6d 已由 ADR-036（2026-10-26）取代**——本仓定位为**服务**，G0 已落 `cmd/brokergateway`（`/healthz`、`/version`）+ `Dockerfile` + `deploy/compose.yaml`（`:8091`）；订单 HTTP 面已在 `SVC-BROKER-G1` 落地；真实 XTP 仍 ⛔（X6c）
+**状态**：已启动（2026-10-24 施工 ④ ＋ 2026-10-25 施工 ⑤ = G7）——X6a 四 port + 内存 `Mock` 已落 `internal/gateway`；X6b 对账纯函数（快照口径 + 差异注入验收）已落 `internal/reconcile`；X6c 装配闸 + fail-closed 骨架 + **持久幂等映射 `broker.order_acks`**（`internal/ackstore`，ADR 0002）已落；R5 申报数量纯函数（`internal/gateway/lot`）已落并让 Mock 共用；**X6c 全量适配器 ⛔ 阻塞**（G7 判定：本仓 / core / 本机 C 工具链 / CI **四处都没有 SDK**，缺的是开工前置 P1~P5，不是漏做的一步——取证、剩余范围与触发条件见 `docs/x6c-xtp-readiness.md`）；R10（映射读失败报成 `channel_down`）已落（2026-11-07），R9 维持暂缓到 X6c；`broker.order_acks` 的 G2（部分索引 + **90 天暂定**保留期，只删 `ack IS NOT NULL`，单批 ≤ 5000，进程内 24h 清理）代码已落、PG 集成腿未执行（记 🔶）；G1 订单/查询/对账 HTTP 面已落（`/api/broker`，写侧 `BROKER_SERVICE_TOKEN`，未设即关闭写面），core 侧消费仍归 G3（⛔ 等 QT-51）；G4 失败语义六类 + 就绪口径（`/healthz` 唯一探针，就绪 = 装配闸通过）+ `docs/runbook.md` + 内存演练已落（2026-11-07，真 PG 演练腿未执行，记 🔶）；**X6d 已由 ADR-036（2026-10-26）取代**——本仓定位为**服务**，G0 已落 `cmd/brokergateway`（`/healthz`、`/version`）+ `Dockerfile` + `deploy/compose.yaml`（`:8091`）；订单 HTTP 面已在 `SVC-BROKER-G1` 落地；真实 XTP 仍 ⛔（X6c）
 
 **今天的实现**（本仓，2026-10-24）：`internal/gateway` 的 `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` 四个 port、DTO、12 个契约哨兵、`Mock`（`ClientOrderID` 幂等 + 写前日志 + `unknown_state`）、`MemoryAckStore`、`XTPTrader`（fail-closed 骨架：构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一、或 `Acks.Durable()==false` 即拒绝，已装配后所有方法恒 `channel_down`，零 fake success）；`internal/reconcile` 的快照口径对账纯函数；`internal/ackstore` 的持久幂等映射 `broker.order_acks`（原子 `Reserve` + 回执写回）；`internal/gateway/lot` 的申报数量纯函数（R5，Mock 共用）。**未接 core、无 XTP SDK 链路、未接真实柜台**（PG 只用于幂等映射）；细节见 `docs/ARCHITECTURE.md` §9.8。
 
@@ -60,7 +60,7 @@ go test ./...
 ## 5. 活在哪、文档在哪
 
 - **本仓台账**：`docs/TASKS.md`（唯一）。**没有单号别开工。**
-- 文档导航：`docs/README.md`；边界与依赖方向：`docs/ARCHITECTURE.md`；决策：`docs/adr/`。
+- 文档导航：`docs/README.md`；边界与依赖方向：`docs/ARCHITECTURE.md`；运维（起停 / 装配闸 / 幂等映射 / `unknown_state` / 对账 / KillSwitch）：`docs/runbook.md`；决策：`docs/adr/`。
 - 跨仓背景（只读，不在本仓改）：`tellurion:docs/design/qt-decoupling/repo-topology-and-naming.md`、`tellurion:docs/TASKS.md`。
 
 > 跨仓引用一律写 `repo:path` 纯文本，**不做可点击相对链接**——独立 checkout 时 `../../` 必断，R2 会永远红。
@@ -75,4 +75,4 @@ go test ./...
 | 接口形状（对外暴露什么、错误码、幂等） | `docs/api-schema.md` |
 | 流向与顺序（数据怎么走、哪里 fail-closed） | `docs/dataflow.md` |
 
-**变更触发是硬约束**（完整表见 `docs/README.md` §3）：改表 → 改 `db-schema.md`；改接口 → 改 `api-schema.md`；改链路 → 改 `dataflow.md`；改分层 → 改 `ARCHITECTURE.md` + 一条 ADR；删档/迁移/换工具 → 一条 ODR。PR 里代码动了而对应文档没动，应被打回。
+**变更触发是硬约束**（完整表见 `docs/README.md` §3）：改表 → 改 `db-schema.md`；改接口 → 改 `api-schema.md`（就绪 / 排查口径同时改 `runbook.md`）；改链路 → 改 `dataflow.md`；改分层 → 改 `ARCHITECTURE.md` + 一条 ADR；删档/迁移/换工具 → 一条 ODR。PR 里代码动了而对应文档没动，应被打回。

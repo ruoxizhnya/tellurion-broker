@@ -151,6 +151,17 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 
 > `order_rejected` 的响应**同时**带 `ack`（回执留痕，§2 的"ack 与 error 同时非 nil"在 HTTP 面翻译成 409 + `ack` 字段）。
 
+### 1.6 就绪探针口径（G4 定死，二选一已选）
+
+**选择：不引入 `/readyz`；`/healthz` 是唯一探针，就绪 = 装配闸通过。**
+
+- 本仓只监听一个 HTTP 端口（默认 `:8091`），没有独立的业务监听面；再引入 `/readyz` 会让「进程活着 / 通道可用 / 幂等存储可用 / 可接单」四种状态争同一个探针，调用方与编排器反而无从判断该信谁。唯一探针同时消除了两处文档各写一套口径的漂移风险。
+- **真钱态**：`NewXTPTrader` 的装配闸在**构造期**执行（持久 `AckStore` / `SettlementQuerier` / `HealthChecker` 缺一即 `ErrAssemblyIncomplete`）；构造失败进程不启动。因此「进程能监听」⇒「装配闸已通过」。
+- **Mock 态**：`NewMock` + `httpapi.New` 在启动期完成装配；`httpapi.New` 缺 port 直接 panic，不会带半装配继续跑。Mock 允许 `Store=nil`（每笔下单 fail-closed 为 `idempotency_store_unavailable`），这仍然算「就绪」——**就绪回答的是「进程该不该被重启」，不是「这一笔能不能下」**。
+- **`/healthz` 的语义**：只回答通道可用性（`HealthChecker.HealthCheck`），失败返回 `503 {"status":"down","reason":"channel_unavailable"}`。它**不**代表幂等映射可用：后者是 `idempotency_store_unavailable`（503）这条**业务错误**。把 PG 池塞进探针会让读侧（查单 / 持仓 / 对账）被整体摘掉，反而扩大事故面。
+- `Acks.Durable()` 是构造期静态判据，不是运行期探针。
+- 运维侧的同一口径与命令见 [`runbook.md`](runbook.md) §1。
+
 ## 2. 错误码与 fail-closed 语义
 
 > **12 个 code = 12 个 Go 哨兵**。调用方只 `errors.Is` 契约哨兵；适配器私有错误（如 XTP `ErrOffline`）必须在边界翻译成本表之一。
@@ -158,7 +169,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 | code | Go 哨兵 | 含义（判据） | 发送了吗 | 调用方行为 |
 |---|---|---|---|---|
 | `order_rejected` | `ErrOrderRejected` | 柜台**明确**拒单，回执已拿到 | 是 | **不重试**；`OrderAck{Status: rejected, Code, Reason}` 与 error **同时非 nil**（回执要留痕），其余情况 ack 为 nil |
-| `unknown_state` | `ErrUnknownState` | 已发出，但**结果未知**（超时 / 发送后断连） | 是（可能） | **禁止重发**；只能 `QueryOrder` / 对账；查不到 → 告警 + 人工介入（真钱不做自动补偿） |
+| `unknown_state` | `ErrUnknownState` | 已发出，但**结果未知**（超时 / 发送后断连 / 回执落盘失败） | 是（可能） | **禁止重发（严禁换 `client_order_id` 重发）**；只能 `QueryOrder` / 对账；查不到 → 告警 + 人工介入（真钱不做自动补偿） |
 | `channel_down` | `ErrChannelDown` | 未连接 / 熔断中 / 健康检查失败 | 否 | 熔断：停止下单 + 告警；**不静默重试** |
 | `duplicate_order` | `ErrDuplicateOrder` | 同 `ClientOrderID`、**不同载荷** | 否 | fail-loud；绝不发第二笔；调用方查单或换 ID（换 ID 前先确认原单不存在） |
 | `order_not_found` | `ErrOrderNotFound` | 网关**能证明**从未发送过该 ID | 否 | 可按新单处理（由调用方决定）；不得据此推断柜台侧不存在 |
@@ -172,6 +183,22 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 
 **最重要的一条**：超时 = 状态未知，不是"失败"。盲目重发是实盘事故的经典来源。
 **第二重要的一条**：未实现的能力返回 `not_supported`，**绝不返回成功形状**（今天 XTP `EmergencyFlatten` 反例见 §9.1 F4）。
+
+### 2.1 六类失败语义：网关侧发生了什么、调用方能做什么（G4）
+
+> 「重试」「换新 ID」「必须查单」是三个互斥动作，不要凭直觉混用。
+> `unknown_state` 单独成行——它是本仓最要命的一条。
+
+| 类别（code） | 网关侧发生了什么 | 调用方能做什么 |
+|---|---|---|
+| `channel_down` | 未连接 / 熔断中 / `HealthCheck` 失败；**未发送**，也未占幂等位 | 不静默重试；熔断 + 告警，等显式恢复；恢复后可用**同一** `client_order_id` 重试（网关证明未发送）；**不要**换新 ID |
+| **`unknown_state`** | **已发出**（或无法证明未发出），结果未知：发送后超时 / 断连、回执落盘失败、撤单时映射里有占位而本地无状态 | **必须查单**：用**同一个** `client_order_id` 调 `GET /api/broker/orders/{id}`；查不到就继续查 / 等对账 + 告警 + 人工介入。**严禁换 `client_order_id` 重发**（换 ID = 柜台第二笔）。网关的错误文本固定带「不得重发 / 先查单」提示，`internal/gateway/mock_test.go` 有反证用例 |
+| `idempotency_store_unavailable` | 本仓自己的**幂等映射**不可用（PG 池断 / `Load` / `Reserve` / `SaveAck` 失败）。下单发送前失败 ⇒ **未发送**；查单 / 撤单读映射失败 ⇒ 这一单**可能已在柜台** | 这是**可用性事故**，不是下单失败。不要循环重试、不要换 ID；先修存储 / 查存储告警；恢复后用**同一** ID 重试下单。若是查单 / 撤单路径报出，恢复后先查单再决定，**不能推断「没发过」** |
+| `order_not_found` | 网关**能证明**从未发送过该 ID（本地无状态且幂等映射无占位） | 可按新单处理（由调用方决定）；可复用或换 ID；**不得**据此推断柜台侧一定不存在 |
+| 幂等冲突 `duplicate_order` | 同 `client_order_id`、**不同载荷**；**未发送**，绝不发第二笔 | 不重试；先查原单 / 核对载荷；只有确认原单不存在且确需新单时才用**新 ID**，并在事故记录里写清 |
+| 申报数量不合规 `invalid_order`（`internal/gateway/lot`） | 通道侧校验失败：入参非法（`invalid_input`）、数量 ≤0、非申报单位整数倍（`not_lot_multiple`）、不足一手（`zero_quantity`）、超可用（`exceeds_available_quantity`）、超资金（`insufficient_capital`）、涨跌停越界（`price_above_limit_up` / `price_below_limit_down`）；**未发送** | 修参数后重新提交；**用新 `client_order_id`**（不要让同一 ID 携带不同载荷，否则会变成 `duplicate_order`）；不要靠网关缩量 / 抬量 |
+
+> 六类里的后两类在本仓的落点：幂等冲突由 `AckStore.Reserve` + 指纹比对判定（`internal/gateway/mock.go`）；申报数量由 `internal/gateway/lot` 判定——`Mock.PlaceOrder` 直接校 `ValidateQuantity`（显式数量），`Size` 的超可用 / 超资金 / 涨跌停拒单原因发生在调用方算量阶段，同归 `invalid_order`。两者都在发送前，因此都不会产生柜台订单。
 
 ## 3. 幂等性与重试
 
@@ -214,3 +241,11 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 - 不持有订单真相（只透传柜台状态；订单持久化在 core `quant`，最终归属 U2）
 - 不做资金划转
 - 不持有对账结论（对账留痕归 `tellurion-risk`，网关只提供 `QuerySettlement` 快照）
+
+## 6. 开真钱前置（永久，G4）
+
+> **本仓今天未接真钱。** `X6c` 是 ⛔，不是待办：缺 P1~P5（SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗，见 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) §4）。这条不随 G4 完成而解除。
+
+**永久闸门**：开真钱之前，`SVC-BROKER-G1`（订单 / 查询 / 对账 HTTP 面）、`SVC-BROKER-G2`（幂等映射保留期）、`SVC-BROKER-G3`（core 切读与旧实现退役）、`SVC-BROKER-G4`（失败语义 / 就绪 / 熔断 / runbook / 演练）**必须全部 ✅**；任一 🔶 / ⛔ / ⬜ 都不得开真钱，也不得以「先跑小单」绕过。截至 2026-11-07：G1 ✅、G2 🔶（PG 集成腿未执行）、G3 ⛔（等 QT-51）、G4 🔶（真 PG 演练腿未执行）。
+
+机械判据：本仓没有 XTP SDK 链路、`XTPTrader` 恒 `channel_down`、`cmd/brokergateway` 只装配 Mock。任何「已经可以接真钱」的说法都必须先让上面四项全绿，并另立 ADR 记录切换判据。运维视角的同一闸门见 [`runbook.md`](runbook.md) §9。

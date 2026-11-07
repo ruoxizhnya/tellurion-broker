@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -379,6 +380,52 @@ func TestPlaceOrderReportsUnknownWhenAckCannotBePersisted(t *testing.T) {
 	state, err := m.QueryOrder(context.Background(), "c-1")
 	if err != nil || state.Status != OrderFilled {
 		t.Fatalf("QueryOrder = %+v, err=%v", state, err)
+	}
+}
+
+// G4 反证用例：unknown_state 的报文必须把「不得重发 / 先查单」带出去。
+// 这不是文案偏好——unknown_state 是已发出但结果未知，换新 client_order_id
+// 重发会在柜台上留下第二笔。删掉提示语会让本用例红（破坏验证）。
+func TestUnknownStateErrorCarriesNoResendGuidance(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ack persistence failure", func(t *testing.T) {
+		m, store, _ := newMock(t, MockOptions{Cash: 5000})
+		store.failWrite = func(n int) bool { return n == 2 }
+		_, err := m.PlaceOrder(ctx, marketReq("c-1"))
+		assertUnknownStateGuidance(t, err)
+		t.Logf("unknown_state message: %v", err)
+	})
+
+	t.Run("replay of a placeholder", func(t *testing.T) {
+		m, store, _ := newMock(t, MockOptions{Cash: 5000})
+		store.failWrite = func(n int) bool { return n == 2 }
+		if _, err := m.PlaceOrder(ctx, marketReq("c-1")); !errors.Is(err, ErrUnknownState) {
+			t.Fatalf("first call err = %v, want ErrUnknownState", err)
+		}
+		_, err := m.PlaceOrder(ctx, marketReq("c-1"))
+		assertUnknownStateGuidance(t, err)
+	})
+
+	t.Run("cancel with a reserved mapping but no local state", func(t *testing.T) {
+		m, store, _ := newMock(t, MockOptions{Cash: 5000})
+		if _, _, err := store.Reserve(ctx, "ACC-1", "c-9", "fp"); err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+		_, err := m.CancelOrder(ctx, CancelRequest{ClientOrderID: "c-9"})
+		assertUnknownStateGuidance(t, err)
+	})
+}
+
+func assertUnknownStateGuidance(t *testing.T, err error) {
+	t.Helper()
+	if !errors.Is(err, ErrUnknownState) {
+		t.Fatalf("err = %v, want ErrUnknownState", err)
+	}
+	for _, marker := range []string{"client_order_id", "不得重发", "先查单"} {
+		if !strings.Contains(err.Error(), marker) {
+			t.Fatalf("unknown_state message must carry %q guidance, got %q", marker, err.Error())
+		}
 	}
 }
 

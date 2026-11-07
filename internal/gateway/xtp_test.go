@@ -38,6 +38,7 @@ func TestNewXTPTrader_GateRejectsIncompleteAssembly(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want it to name the missing dep %q", err, tc.want)
 			}
+			t.Logf("gate rejected: %v", err)
 			if x != nil {
 				t.Fatal("rejected assembly must not yield an instance")
 			}

@@ -177,10 +177,14 @@ func (m *Mock) PlaceOrder(ctx context.Context, req OrderRequest) (*OrderAck, err
 		RequestFingerprint: fingerprint,
 		Ack:                ack,
 	}); saveErr != nil {
-		return nil, fmt.Errorf("%w: persist ack: %v", ErrUnknownState, saveErr)
+		return nil, fmt.Errorf("%w: persist ack: %v; %s", ErrUnknownState, saveErr, unknownStateHint)
 	}
 	return &ack, err
 }
+
+// unknownStateHint 是 unknown_state 的强制处置提示（docs/api-schema.md §2.1）：
+// 未决不是失败。换 client_order_id 重发会在柜台上留下第二笔，只能先查单。
+const unknownStateHint = "do not resend (不得重发，严禁换 client_order_id 重发); query the order first (先查单)"
 
 // replayAck 把已落盘的记录还原成当初的结论：
 //   - 同 ID 不同载荷 → ErrDuplicateOrder（绝不发第二笔）；
@@ -191,7 +195,7 @@ func replayAck(req OrderRequest, fingerprint string, rec IdempotencyRecord) (*Or
 		return nil, fmt.Errorf("%w: client_order_id %q was used with a different payload", ErrDuplicateOrder, req.ClientOrderID)
 	}
 	if rec.Ack.Status == "" {
-		return nil, fmt.Errorf("%w: client_order_id %q has no acknowledgement", ErrUnknownState, req.ClientOrderID)
+		return nil, fmt.Errorf("%w: client_order_id %q has no acknowledgement; %s", ErrUnknownState, req.ClientOrderID, unknownStateHint)
 	}
 	ack := rec.Ack
 	ack.IdempotentReplay = true
@@ -359,7 +363,7 @@ func (m *Mock) CancelOrder(ctx context.Context, req CancelRequest) (*OrderState,
 				// 报 channel_down 会让调用方按线路故障处置，而这一单可能已在柜台上。
 				return nil, fmt.Errorf("%w: %v", ErrIdempotencyStoreUnavailable, err)
 			} else if found {
-				return nil, fmt.Errorf("%w: client_order_id %q may already be at the counter; query the order, do not retry the cancel", ErrUnknownState, req.ClientOrderID)
+				return nil, fmt.Errorf("%w: client_order_id %q may already be at the counter; %s", ErrUnknownState, req.ClientOrderID, unknownStateHint)
 			}
 		}
 		return nil, fmt.Errorf("%w: %s", ErrOrderNotFound, req.ClientOrderID)

@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-07
-verified-by: G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 🔶（代码已落，PG 集成腿未执行）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
+verified-by: G4 🔶（失败语义六类 / 就绪口径 / runbook / 内存演练已落，真 PG 演练腿未执行）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 🔶（代码已落，PG 集成腿未执行）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -190,7 +190,7 @@ verified-by: G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用�
 > - **文档同步**：`docs/api-schema.md` §2（`idempotency_store_unavailable` 行补「含查单/撤单读映射失败」）+ §3（新增一条 R10 语义）、`docs/ARCHITECTURE.md` §9.7 R10 行改「已落」、`AGENTS.md` §1 状态行、本文件头部与 QT-45 施工记录（「R9 / R10 待裁」改为 R10 已落，R9 维持暂缓到 X6c）。
 > - **如实登记**：本机 `CGO_ENABLED=0`，`-race` 跑不了；PG 集成腿无 `BROKER_TEST_DSN` 时按设计 skip，本轮未起库。
 
-### SVC-BROKER-G4 · 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036）[P1] ⬜
+### SVC-BROKER-G4 · 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036）[P1] 🔶（2026-11-07 施工：①~⑥ 文档与内存演练已落；真 PG 演练腿未执行，不标 ✅）
 
 - **① 目标**：把「通道什么时候算不可用、不可用时对外说什么、谁来判断」写成文档并演练一次——本仓是全系统唯一**直接面对钱**的边界，失败语义含糊的代价与其它五仓不同量级。
 - **② 上下文**：`cmd/brokergateway` 已有 `/healthz` + `/version`（G0 ✅，`:8091`）；`XTPTrader` 是 fail-closed 骨架（构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一、或 `Acks.Durable()==false` 即拒绝；装配后所有方法恒 `channel_down`，**零 fake success**）——这个姿势是对的，本单不改行为、只把它变成可核对的文档与演练；**`/readyz` 全 workspace 0 命中**（gateway 没有监听业务端口，「就绪」到底指什么必须先回答）；PG 只用于幂等映射，映射不可用与柜台不可用**必须是两个码**（R10 就是这条的具体化）；无 runbook（全 workspace `runbook` 只在 ADR-036 正文）；X6c 的四份 `docs/x6c-xtp-readiness.md` 有 P1~P5 前置，但「运维怎么判断现在能不能开」没有一页纸。
@@ -198,6 +198,16 @@ verified-by: G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用�
 - **④ 约束与非目标**：不改 fail-closed 骨架的行为（它是设计，不是缺陷）；不在本单落订单 HTTP 面（`SVC-BROKER-G1` ⛔）；不接真实 XTP（X6c ⛔，四处无 SDK）；不引 APM；不做多副本。
 - **⑤ 验收**：① 失败语义表六类齐全，且每类有「调用方动作」一列；② 反证用例：`unknown_state` 的报文里必须出现「不得重发/先查单」的语义（用例断言错误文本或 code），破坏验证：删掉该提示 ⇒ 红；③ 就绪口径在 `api-schema.md` 与 `runbook.md` 两处一致；④ 演练有真退出码（关 PG 前后各一次）；⑤ runbook 每条命令当场执行；⑥ 三条命令绿。
 - **⑥ 边界**：本仓失败语义与运维面；订单 HTTP 契约归 `SVC-BROKER-G1`，DTO 进契约归 `tellurion-contracts:CT-05`，core 旧实现退役归 `tellurion:SVC-CORE-BROKER-RETIRE`。
+
+> - **施工（2026-11-07，G4 ①~⑥）**：`docs/api-schema.md` §2.1 新增六类失败语义表（`channel_down` / `unknown_state` / `idempotency_store_unavailable` / `order_not_found` / `duplicate_order` / `invalid_order`），每行写「网关侧发生了什么 + 调用方能做什么」；`unknown_state` 单独成行且写「严禁换 `client_order_id` 重发」。
+> - **反证**：`internal/gateway/mock.go` 新增 `unknownStateHint`，三条 `unknown_state` 分支统一带「不得重发 / 先查单」；`TestUnknownStateErrorCarriesNoResendGuidance` 三个子用例（回执落盘失败 / 占位重放 / 有映射无本地状态的撤单）断言错误链与文本标记。破坏验证：删掉回执分支提示 → `DESTROY_EXIT=1`，红信息 `unknown_state message must carry "client_order_id" guidance, got "broker: order state unknown: persist ack: store write failed"`；还原前后 sha256 均为 `3814ED0EB7BA8B5B808099C74ECCA155AB62923F5F914AEB34EF4E4C66BF1D90`，复跑 `RESTORE_EXIT=0`。
+> - **就绪口径**：选「不引入 `/readyz`；`/healthz` 唯一探针，就绪 = 装配闸通过」，理由（单监听面 / 构造期闸 / PG 故障是业务错误不是探针失败 / `Durable()` 是静态判据）写在 `api-schema.md` §1.6 与 `runbook.md` §1，两处一致；未改 fail-closed 行为。
+> - **KillSwitch**：`runbook.md` §7 写触发权限、命令、`sold`/`skipped` 读法、解除三条件、留痕（响应 JSON + `reason` + 事故单；本仓不持久化审计，R7 缺口如实写，不声称"网关已留痕"）。
+> - **runbook**：新建 `docs/runbook.md`，含起停 / DSN fail-closed / 装配闸离线核对 / 幂等映射 SQL 与 `BROKER_TEST_DSN` 姿势 / `unknown_state` 五步排查 / reconcile 快照口径 / 演练 / 永久前置 / 执行覆盖表；本次可执行命令均已真跑（`:18091` 起停、`/healthz`、下单、查单、404、`emergency-flatten`、无库 DSN 启动退出 1）。
+> - **演练**：`internal/httpapi/g4_drill_test.go`（httptest + 可切换故障 store）→ 故障期 `503 idempotency_store_unavailable`（无 `broker_order_id` / `status=accepted`，`QueryFills=0`）→ 恢复后同 ID `200 filled`；`DRILL_EXIT=0`。真 PG 腿**未执行**（本机无 PG、Docker 不可用、无 DSN）。
+> - **永久前置**：`api-schema.md` §6 + `runbook.md` §9 写明「未接真钱」是永久 G4 前置（X6c ⛔ P1~P5），开真钱前 G1/G2/G3/G4 必须全绿；当前 G1 ✅ / G2 🔶 / G3 ⛔ / G4 🔶。
+> - **门禁（真实）**：`gofmt -l .` 无输出（`GOFMT_EXIT=0`）；`go build ./...` 0；`go vet ./...` 0；`go test ./... -count=1` 0（ackstore / gateway / lot / httpapi / reconcile 全 `ok`）。
+> - **未执行**：真 PG 停库演练、`psql` 映射查询、`BROKER_TEST_DSN` 集成腿、`-race`（`CGO_ENABLED=0`）、Docker。因此本单标 🔶，不标 ✅。
 
 ## 施工序（候选单，开工前必须展开成六字段）
 

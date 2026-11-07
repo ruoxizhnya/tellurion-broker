@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: M8 接口对表（QT-45 前置 ②）
+last-verified: 2026-11-07
+verified-by: G4 runbook 落地（起停 / 装配闸 / 幂等映射 / unknown_state / 对账 / KillSwitch / 演练）
 ---
 
 # 文档导航 — tellurion-broker
@@ -22,6 +22,7 @@ verified-by: M8 接口对表（QT-45 前置 ②）
 | 改数据流向或顺序 | [`dataflow.md`](dataflow.md) |
 | 想知道"为什么这样设计" | [`adr/`](adr/README.md) |
 | 想知道"真钱通道（X6c）为什么还不开工 / 开工要什么" | [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md)（G7 决策材料） |
+| 起停 / 看装配闸拒因 / 查幂等映射 / 排查 `unknown_state` / 对账 / 紧急清仓 | [`runbook.md`](runbook.md) |
 | 要做删档 / 迁移 / 流程变更 | [`odr/`](odr/README.md) |
 | 查历史 | [`archive/`](archive/README.md) |
 
@@ -33,6 +34,7 @@ verified-by: M8 接口对表（QT-45 前置 ②）
 | [`db-schema.md`](db-schema.md) | **表结构唯一真相源** + 所有权声明 | 改表的人 |
 | [`api-schema.md`](api-schema.md) | **对外接口唯一真相源** + 错误码 / 幂等 / 兼容 | 改接口的人 |
 | [`dataflow.md`](dataflow.md) | 数据流向、时序、fail-closed 点、不变量 | 改链路的人 |
+| [`runbook.md`](runbook.md) | **运维手册**：就绪口径、起停、装配闸拒因、幂等映射查询、`unknown_state` 排查顺序、对账、KillSwitch、G4 演练与永久前置 | 改运行面 / 错误语义的人 |
 | [`TASKS.md`](TASKS.md) | 可执行任务（六字段） | 每个人 |
 | [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) | **X6c 真钱通道的开工条件与决策材料**（G7）：四处取证 / 九项不可猜的柜台事实 / 剩余范围哪一半与 SDK 无关 / P1~P5 前置 / 三个选项与触发条件 | 议 X6c 之前必读的人 |
 | [`adr/`](adr/README.md) | 架构决策（只增不删） | 提变更的人 |
@@ -44,7 +46,7 @@ verified-by: M8 接口对表（QT-45 前置 ②）
 | 代码变更 | 必须更新的文档 |
 |---|---|
 | 建表 / 加列 / 加索引 / 改主键 | `db-schema.md`（+ 结构级变更立 ADR） |
-| 新增 / 修改 / 废弃接口 | `api-schema.md`（错误码与幂等两节要一起看；port / DTO 变更同时改 `ARCHITECTURE.md` §9） |
+| 新增 / 修改 / 废弃接口 / 改错误语义或探针口径 | `api-schema.md`（错误码与幂等两节要一起看；port / DTO 变更同时改 `ARCHITECTURE.md` §9）+ `runbook.md`（就绪 / 排查 / 演练口径要同步） |
 | 新增数据源、改聚合口径、改顺序 | `dataflow.md` |
 | 改分层、依赖方向、模块职责 | `ARCHITECTURE.md` + 一条 ADR |
 | 删档 / 迁移 / 换 CI / 换工具链 | 一条 ODR |
