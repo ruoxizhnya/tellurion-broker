@@ -153,7 +153,7 @@ func (m *Mock) PlaceOrder(ctx context.Context, req OrderRequest) (*OrderAck, err
 		return nil, fmt.Errorf("%w: no ack store configured", ErrIdempotencyStoreUnavailable)
 	}
 
-	fingerprint := req.Fingerprint()
+	fingerprint := Fingerprint(req)
 	// 快路径：映射里已有结论就原样还原。重放不需要通道，所以这一读在连接判定之前。
 	if rec, found, err := m.store.Load(ctx, m.accountID, req.ClientOrderID); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrIdempotencyStoreUnavailable, err)

@@ -73,7 +73,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 ## 1.5 HTTP 面（`SVC-BROKER-G1`，2026-11-07 落地）
 
 > **实现**：`internal/httpapi`（只做报文与错误码翻译，不裁决、不改单、不持状态），挂载在 `cmd/brokergateway` 的 `/api/broker/` 下；port 形态（§1）保留，两者是**同一份实现的两个面**。
-> **窗口期义务（CT-05 收编前置）**：本节就是订单 / 成交 / 账户三族的**逐字段报文表**；`internal/httpapi` 的用例**断言序列化后的键集合**（`TestOrderAndAccountPayloadShapes`）。收编契约时必须「删本地形状改引契约」，且在**同一份报文快照**上证明改前 / 改后逐字节一致——**不允许两份 DTO 并存**。
+> **窗口期义务（CT-05 收编前置）**：本节就是订单 / 成交 / 账户三族的**逐字段报文表**；`internal/httpapi` 的用例**断言序列化后的键集合**（`TestOrderAndAccountPayloadShapes`）。收编契约时必须「删本地形状改引契约」，且在**同一份报文快照**上证明改前 / 改后逐字节一致——**不允许两份 DTO 并存**。✅ 已于 2026-11-09 收编完成：`internal/gateway/model.go` 只留 `tellurion-contracts/broker` 类型别名，逐字节 goldens 见 `internal/gateway/wire_shape_test.go`；本节字段表继续作为**契约的对外说明**，不再是本仓字段 owner。
 
 ### 1.5.1 路由
 

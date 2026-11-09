@@ -2,7 +2,10 @@ module tellurion-broker
 
 go 1.25
 
-require github.com/jackc/pgx/v5 v5.7.3
+require (
+	github.com/jackc/pgx/v5 v5.7.3
+	github.com/ruoxizhnya/tellurion-contracts v0.9.0
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
