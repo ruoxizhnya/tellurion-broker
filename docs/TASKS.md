@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-07
-verified-by: G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
+last-verified: 2026-11-10
+verified-by: SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`、`main:pkg/backtest/execution/port.go` EXIT=0，叠加 G1 HTTP 面已落 ⇒ 两道前置全部解除，状态 ⛔ → ⬜；施工四步逐条列明，未做一步不勾；X6c 仍 ⛔）；G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -63,7 +63,7 @@ verified-by: G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练
 > - **破坏验证（两条）**：① 把「token 未配置」分支改成放行 → `TestWriteEndpointsRequireServiceToken` 红（`disabled writes = 400 invalid_order`，`DESTROY_EXIT=1`）；② 把 `idempotency_store_unavailable` 映射改成 500/internal_error → 对应子用例红（`status = 500, want 503`，`DESTROY2_EXIT=1`）；均逐行还原后复绿。
 > - **未做（如实，不写成已完成）**：**core 侧调用未接**（消费与对拍归 `SVC-BROKER-G3`，仍受 QT-51 合入阻塞）；读侧未做鉴权（G4）；X6c 仍 ⛔；`-race` 本机跑不了（`CGO_ENABLED=0`）。
 
-### SVC-BROKER-G3 · core 切读与旧 LiveTrader 退役（ADR-036 G3）[P0] ⛔（2026-10-26 复核：无消费面）
+### SVC-BROKER-G3 · core 切读与旧 LiveTrader 退役（ADR-036 G3）[P0] ⬜（2026-11-10 前置复核：QT-51 已合入、G1 已落，两道前置均解除；施工未开工）
 
 - **① 目标**：core 的交易通道调用走本仓；core `pkg/live` / `pkg/live/broker` 旧实现退役（R4 关闭）。
 - **② 上下文**：core 仍跑 `MockTrader` / `LiveTrader`；本仓 X6c 全量适配器仍被 SDK 阻塞，但 Mock 路径可先切。
@@ -77,6 +77,16 @@ verified-by: G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练
 > ⚠️ **同日实测订正两处**：① `SVC-CORE-BROKER-RETIRE` **已立单**——`tellurion:docs/TASKS.md:157`「六之二」，串行第 9（判据 = B 组材料 §4.6），不再是本单的前置；② G1 的死锁已裁（见上方 `SVC-BROKER-G1` 的裁定块：G1 先行、DTO 暂留本仓）。⇒ 本单真正的剩余前置只剩两条：**QT-51 合入**（2026-10-26 复测：`pkg/backtest/execution/port.go` 仍只在未合入分支 `task/qt51-execution-port`，main 上 `git cat-file -e main:pkg/backtest/execution/port.go` 失败 ⇒ 这条 ⛔ 属实）**+ G1 HTTP 面落地**。
 >
 > ⚠️ **2026-11-07 复核**：前置之一 **G1 HTTP 面已落**（`internal/httpapi`，见上方施工记录）⇒ 本单剩余前置只剩 **QT-51 合入**；本单状态仍 ⛔ 不变（core 无执行 port 即无消费面，不能开工）。
+
+> **2026-11-10 前置复核（⛔ → ⬜，仍未开工）**：最后一道前置 **QT-51 已合入 core 主干** —— `git -C tellurion log --oneline -1 a2e388a` 实测 `a2e388a feat(backtest): QT-51 回测/实盘执行语义分离（ExecutionPort）`；`git cat-file -e main:pkg/backtest/execution/port.go` **EXIT=0**，main 上已有 `ExecutionPort`（`SubmitOrder` / `CancelOrder` / `GetOrder` / `Name` / `HealthCheck`）与 `cmd/analysis/wiring/live_trader_port.go` 的适配样板。⇒ 两道前置（G1 HTTP 面、QT-51 执行 port）**均已解除**，本单从「不可开工」转为「可开工未开工」，状态改 ⬜。
+>
+> **施工步骤（按 ③ 四步，未做一步不勾）**：
+> 1. ⬜ core 侧第二实现：新增 `ExecutionPort` 的 HTTP 适配器（`POST /api/broker/orders`、`GET /api/broker/orders/{clientOrderID}`、`DELETE`），订单 ID 映射走 `client_order_id`，**不改**运行域（持仓/结算仍 core）。
+> 2. ⬜ 对拍：同一批订单分别走旧 `MockTrader` 与新 HTTP 适配器，逐笔比订单状态 / 成交价 / 费用 / 持仓增量；报告归档。
+> 3. ⬜ 切读：装配层按配置选 HTTP 适配器；默认仍旧实现（可回滚）。
+> 4. ⬜ 停写：core 侧旧通道适配零调用后，由 `SVC-CORE-BROKER-RETIRE` 删 `pkg/live` / `pkg/live/broker` 的通道适配。
+>
+> **如实登记**：`X6c`（真实 XTP）仍 ⛔ 不变（无 SDK / C 工具链 / 柜台网络，见 `x6c-xtp-readiness.md`）；本单是 Mock 路径的切读，不接真钱。
 
 ### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] 🔶
 
