@@ -63,7 +63,7 @@ verified-by: SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`
 > - **破坏验证（两条）**：① 把「token 未配置」分支改成放行 → `TestWriteEndpointsRequireServiceToken` 红（`disabled writes = 400 invalid_order`，`DESTROY_EXIT=1`）；② 把 `idempotency_store_unavailable` 映射改成 500/internal_error → 对应子用例红（`status = 500, want 503`，`DESTROY2_EXIT=1`）；均逐行还原后复绿。
 > - **未做（如实，不写成已完成）**：**core 侧调用未接**（消费与对拍归 `SVC-BROKER-G3`，仍受 QT-51 合入阻塞）；读侧未做鉴权（G4）；X6c 仍 ⛔；`-race` 本机跑不了（`CGO_ENABLED=0`）。
 
-### SVC-BROKER-G3 · core 切读与旧 LiveTrader 退役（ADR-036 G3）[P0] ⬜（2026-11-10 前置复核：QT-51 已合入、G1 已落，两道前置均解除；施工未开工）
+### SVC-BROKER-G3 · core 切读与旧 LiveTrader 退役（ADR-036 G3）[P0] 🔶（2026-11-10：步骤 1~3 已落；步骤 4 归 core 单；⑤「旧通道零调用」未满足，不翻 ✅）
 
 - **① 目标**：core 的交易通道调用走本仓；core `pkg/live` / `pkg/live/broker` 旧实现退役（R4 关闭）。
 - **② 上下文**：core 仍跑 `MockTrader` / `LiveTrader`；本仓 X6c 全量适配器仍被 SDK 阻塞，但 Mock 路径可先切。
@@ -81,10 +81,19 @@ verified-by: SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`
 > **2026-11-10 前置复核（⛔ → ⬜，仍未开工）**：最后一道前置 **QT-51 已合入 core 主干** —— `git -C tellurion log --oneline -1 a2e388a` 实测 `a2e388a feat(backtest): QT-51 回测/实盘执行语义分离（ExecutionPort）`；`git cat-file -e main:pkg/backtest/execution/port.go` **EXIT=0**，main 上已有 `ExecutionPort`（`SubmitOrder` / `CancelOrder` / `GetOrder` / `Name` / `HealthCheck`）与 `cmd/analysis/wiring/live_trader_port.go` 的适配样板。⇒ 两道前置（G1 HTTP 面、QT-51 执行 port）**均已解除**，本单从「不可开工」转为「可开工未开工」，状态改 ⬜。
 >
 > **施工步骤（按 ③ 四步，未做一步不勾）**：
-> 1. ⬜ core 侧第二实现：新增 `ExecutionPort` 的 HTTP 适配器（`POST /api/broker/orders`、`GET /api/broker/orders/{clientOrderID}`、`DELETE`），订单 ID 映射走 `client_order_id`，**不改**运行域（持仓/结算仍 core）。
-> 2. ⬜ 对拍：同一批订单分别走旧 `MockTrader` 与新 HTTP 适配器，逐笔比订单状态 / 成交价 / 费用 / 持仓增量；报告归档。
-> 3. ⬜ 切读：装配层按配置选 HTTP 适配器；默认仍旧实现（可回滚）。
-> 4. ⬜ 停写：core 侧旧通道适配零调用后，由 `SVC-CORE-BROKER-RETIRE` 删 `pkg/live` / `pkg/live/broker` 的通道适配。
+> 1. ✅ core 侧第二实现（2026-11-10）：`tellurion:cmd/analysis/wiring/broker_http_port.go` 的 `BrokerHTTPPort` 满足 `execution.ExecutionPort`（下单 / 撤单 / 查单 / 身份 / 健康），订单 ID 用 `client_order_id`；wire 形状用 `tellurion-contracts/broker` 契约类型；运行域（持仓/结算）未动。
+> 2. ✅ 对拍（2026-11-10）：`TestBrokerHTTPPortParityWithMockTrader` —— 同一批 3 笔市价买单分别走旧 `live.MockTrader` 与 HTTP 适配器，订单意图与成交事实逐项一致；费用/滑点/限价异步/持仓面差异如实登记（见下方施工记录）。
+> 3. ✅ 切读（2026-11-10）：装配层按 `BROKER_URL` 选择 HTTP 适配器，**默认仍走旧实现**（未配即回退，可回滚）；主引擎与 walk-forward 窗口共用同一个端口。
+> 4. ⬜ 停写：core 侧旧通道适配零调用后，由 `SVC-CORE-BROKER-RETIRE` 删 `pkg/live` / `pkg/live/broker` 的通道适配（本仓不动 core 代码）。
+
+> **施工记录（2026-11-10，本机实跑）**：
+> - **① 适配器**：`BrokerHTTPPort` 五个方法；`SubmitOrder` 把 core 意图映射成 `broker.OrderRequest`（symbol 去 `.SZ/.SH` 后缀、long→buy / close→sell、market/limit 两值、quantity 整股校验、市价单 `limit_price` 省略）；`accepted` → port `pending`，`partially_filled` → `partial`，`unknown` **原样透传**（未决不得伪装成 pending/rejected）；filled/partial 回执再查一次订单状态补 `FilledQty`/`FillPrice`。`GetOrder`/`CancelOrder` 走 `GET|DELETE /api/broker/orders/{client_order_id}`；非 2xx 解析 `{code,message}` 信封，错误串保留 wire code（`duplicate_order` / `order_not_cancelable` / `order_not_found` / `unauthorized`）。`HealthCheck` 探 `/healthz`。
+> - **② 装配**：`BROKER_URL` 空 ⇒ 端口为 nil，引擎继续用 `live.LiveTrader` 适配；非空 ⇒ `BROKER_SERVICE_TOKEN` / `BROKER_ACCOUNT_ID` 必填，缺一即 Boot 失败（fail-closed）。选择函数 `wiring.AttachExecutionPort(engine, port, fallback)`，`cmd/analysis/kernel_wiring.go` 构造一次、主引擎与 walk-forward 工厂共用。
+> - **③ 对拍（当场实测输出）**：`000001.SZ qty=100 status=filled/filled fill=12.5062/12.5000 fee=5.01/0`；`600000.SH qty=300 filled/filled 8.2041/8.2000 5.02/0`；`002594.SZ qty=200 filled/filled 30.1151/30.1000 5.06/0`（前者=旧 MockTrader，后者=broker HTTP）。一致项：symbol / direction / order_type / quantity / 状态 / FilledQty；**已知差异**：① broker wire 无费用字段（费用留在 core 运行域）；② 旧实现叠加固定滑点，broker Mock 按参考价成交；③ 限价单在 broker 是「受理 ≠ 成交」，旧实现立即成交；④ `ExecutionPort` 无持仓方法，持仓增量比对不可在本端口口径下执行。
+> - **④ 对拍载体（如实）**：core 与 broker 是两个 module、无 `go.work`，core 不能 import `internal/gateway` ⇒ 对拍用按 `docs/api-schema.md` §1.5 与 Mock 语义实现的 **wire-faithful double**（httptest：token、`client_order_id` 幂等、受理≠成交、八值状态）。**真 broker 进程（MemoryAckStore + Mock）对拍未跑**，不写成已跑。
+> - **⑤ 门禁（core，真实退出码）**：`gofmt -l cmd pkg internal` 空；`go build ./...` = 0；`go vet ./...` = 0；`go test ./... -count=1` = 0（70 个包 `ok`、零 `FAIL` 行）。本仓代码本轮未改（只改本文件）。
+> - **⑥ 破坏验证（真做真还原）**：把 `portStatus` 的 `accepted` 映射改成 `filled` ⇒ `TestBrokerHTTPPortLimitOrderStaysPending` 红（`expected "pending" / actual "filled"`）；逐字节还原后 `cmd/analysis/wiring` 复绿（`ok ... 0.408s`）。
+> - **未做（如实，不写成已完成）**：步骤 4 停写（归 `tellurion:SVC-CORE-BROKER-RETIRE`，其前置口径待裁决：费用/限价异步/持仓面差异是否接受「意图+成交事实一致」）；默认通道切换需主任裁决（当前默认旧实现）；`X6c` 真实 XTP 仍 ⛔。
 >
 > **如实登记**：`X6c`（真实 XTP）仍 ⛔ 不变（无 SDK / C 工具链 / 柜台网络，见 `x6c-xtp-readiness.md`）；本单是 Mock 路径的切读，不接真钱。
 
