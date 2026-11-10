@@ -1,13 +1,13 @@
 ---
 status: active
 last-verified: 2026-11-10
-verified-by: QT-45 收口复核（2026-11-10：⑤ 三条判据逐条点名用例全绿，③ ① 「两实现」因 XTP 仍是 fail-closed 骨架未完成 ⇒ 🔶 → ⛔，唯一硬前置 = X6c P1~P5；同轮 core R4 退役已确认完成）；SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`、`main:pkg/backtest/execution/port.go` EXIT=0，叠加 G1 HTTP 面已落 ⇒ 两道前置全部解除，状态 ⛔ → ⬜；施工四步逐条列明，未做一步不勾；X6c 仍 ⛔）；G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
+verified-by: QT-45 / X6c 终态裁决（2026-11-10：主任授权执行侧裁定 ⇒ `QT-45` 收口 ✅（Mock 全绿 + fail-closed 骨架 + 装配闸为终态）、`X6c` 转 ⏸ 挂起（外部依赖 P1~P5，重开条件与流程见 ADR-0003）；B 组债务结论与 C 组验收清单保留）；QT-45 收口复核（2026-11-10：⑤ 三条判据逐条点名用例全绿，③ ① 「两实现」因 XTP 仍是 fail-closed 骨架未完成 ⇒ 🔶 → ⛔，唯一硬前置 = X6c P1~P5；同轮 core R4 退役已确认完成）；SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`、`main:pkg/backtest/execution/port.go` EXIT=0，叠加 G1 HTTP 面已落 ⇒ 两道前置全部解除，状态 ⛔ → ⬜；施工四步逐条列明，未做一步不勾；X6c 仍 ⛔）；G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
 
 > 本仓**唯一**任务台账。跨仓任务只在 §二 留指针，**不镜像正文**（双写必然漂移）。
-> 状态：`⬜ 待做` / `🔶 进行中` / `⛔ 阻塞（有未解除前置）` / `✅ 完成（附日期）`
+> 状态：`⬜ 待做` / `🔶 进行中` / `⛔ 阻塞（有未解除前置）` / `✅ 完成（附日期）` / `⏸ 挂起（已裁决暂不实施或外部依赖；**不计入开放项**，重开须另立单并满足该条 ① 所指条件）`
 > 每张单六字段（① 目标 ② 上下文 ③ 要求 ④ 约束与非目标 ⑤ 验收 ⑥ 边界），判据见 `tellurion:AGENTS.md` §8.5。
 > 完成即标 ✅（附日期）并移入 `docs/archive/TASKS-YYYY-MM-DD-archived.md`；本文件只留未完成项。
 
@@ -100,7 +100,15 @@ verified-by: QT-45 收口复核（2026-11-10：⑤ 三条判据逐条点名用�
 >
 > **如实登记**：`X6c`（真实 XTP）仍 ⛔ 不变（无 SDK / C 工具链 / 柜台网络，见 `x6c-xtp-readiness.md`）；本单是 Mock 路径的切读，不接真钱。
 
-### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] ⛔
+### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] ✅（2026-11-10 按主任授权收口：终态 = Mock 全绿 + fail-closed 骨架，见 [ADR 0003](adr/0003-真钱通道暂不实施与重开条件.md)）
+
+> **2026-11-10 终态落账（主任把「要不要真钱通道」决策权下放，执行侧裁定）**：
+> - **决策**：现阶段**不投入真钱通道实施**。终态 = **Mock 全链路全绿 + `XTPTrader` fail-closed 骨架（零 fake success）+ 装配闸（缺依赖 / 无持久幂等键构造期拒绝）**。成文 [`ADR 0003`](adr/0003-真钱通道暂不实施与重开条件.md)。
+> - **不是永久不做**：重开条件 = `x6c-xtp-readiness.md` §4 的 **P1~P5 同时满足**（XTP SDK、C 工具链、柜台网络、测试账号、盯盘时间窗）；满足后**另立 X6c 施工单 + 一条真钱形态 ADR**，本 ADR 转 `Superseded`。
+> - **⑤ 验收改写**：① Mock 全链路（`internal/gateway/mock_test.go` 全族 + 6 条 PG 腿按 DSN 门控）；② 两实现共用同一 `BrokerGateway` 调用面（实现层；XTP 为骨架）；③ 通道拒绝 / 风控拒绝 / 通道断开错误码可区分（12 哨兵逐码断言）；④ DTO 契约测试（`wire_shape_test.go`，contracts v0.9.0）；⑤ XTP 装配闸 + 全方法 `channel_down`（`TestNewXTPTrader_GateRejectsIncompleteAssembly` / `TestXTPTrader_AllCallsFailClosedWithChannelDown`）。「XTP 全量适配器」**转挂起项 X6c**，不再是本单验收项。
+> - **保留**：B 组已落债务结论（`order_acks` 保留期口径 / R8 密钥形状 / R9 暂不收紧）与 C 组接入验收清单，作为重开时的准入清单，不改写。
+> - **台账前后**：`⛔（等主任 D3）` → `✅（终态收口）`；`X6c` `⛔` → `⏸ 挂起（外部依赖，不计入开放项）`。
+> - **代码零改动**；本仓门禁不因本裁决变化（`gofmt -l .` 空 / `go build` / `go vet` / `go test ./... -count=1` 全 0，最近一轮见 `SVC-BROKER-G3` 施工记录）。
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
 >
@@ -275,10 +283,10 @@ verified-by: QT-45 收口复核（2026-11-10：⑤ 三条判据逐条点名用�
 
 | 阶段 | 内容 | 上游单号 | 前置 |
 |---|---|---|---|
-| X6a | `BrokerGateway` port + `MockTrader`（`ClientOrderID` 幂等 / 超时语义跑通）🔶（施工 ① 已落 `internal/gateway`，未接 core） | `QT-45` | 本仓立项 + M8 对表 ✅ |
-| X6b | 对账口径定稿（**账户快照** `QuerySettlement` + 真实 broker 侧 + 差异注入验收）🔶（施工 ② 口径纯函数 + 差异注入验收已落 `internal/reconcile`；真实 broker 侧归 X6c 全量） | `QT-45` | X6a |
-| X6c | `XTPTrader` 适配器（从零实现；装配前置：对账 + 幂等 + 熔断，缺一构造期拒绝）**⛔ 阻塞（G7，2026-10-25）**——装配闸 + fail-closed 骨架 + 持久幂等映射已落，全量实现缺 P1~P5 五项外部条件（SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗），本仓与 core 与本机与 CI **四处都没有 SDK**；取证、剩余范围切分与触发条件见 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) | `QT-45` | X6b ＋ **P1+P2 到手且当天有 P5 时间窗** |
-| X6d | 独立进程（回环监听 + 健康检查）——**ADR-036（2026-10-26）取代 2026-10-23「暂缓」**：本仓按服务定位，G0 先落 Mock 服务入口；真实 XTP 仍受 X6c 阻塞 | `SVC-BROKER-G0` / `QT-45` | 多账户共用通道 / 通道级高可用 |
+| X6a | `BrokerGateway` port + `MockTrader`（`ClientOrderID` 幂等 / 超时语义跑通）✅（`internal/gateway` 全量 + core 侧已接（`SVC-CORE-BROKER-RETIRE` 步骤 B），2026-11-10） | `QT-45` | 本仓立项 + M8 对表 ✅ |
+| X6b | 对账口径定稿（**账户快照** `QuerySettlement` + 真实 broker 侧 + 差异注入验收）✅（口径纯函数 + 差异注入验收在 `internal/reconcile`；真实 broker 侧随 X6c 挂起） | `QT-45` | X6a |
+| X6c | `XTPTrader` 全量适配器（从零实现；装配前置：对账 + 幂等 + 熔断，缺一构造期拒绝）**⏸ 挂起（外部依赖，2026-11-10 裁决）**——装配闸 + fail-closed 骨架 + 持久幂等映射已落；全量实现缺 P1~P5 五项外部条件（SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗）。**不计入开放项**；重开 = P1~P5 同时满足 + 另立施工单 + 真钱形态 ADR（见 [`ADR 0003`](adr/0003-真钱通道暂不实施与重开条件.md)）；取证与范围切分见 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) | `QT-45` | X6b ＋ **P1~P5 同时满足** |
+| X6d | 独立进程（回环监听 + 健康检查）——**ADR-036（2026-10-26）取代 2026-10-23「暂缓」**：本仓按服务定位，G0 先落 Mock 服务入口 ✅（`cmd/brokergateway`）；真实 XTP 侧随 X6c 挂起 | `SVC-BROKER-G0` / `QT-45` | 多账户共用通道 / 通道级高可用 |
 
 ## 二、跨仓指针（不在本仓，勿双写）
 

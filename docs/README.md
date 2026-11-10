@@ -34,7 +34,7 @@ verified-by: G4 runbook 落地（起停 / 装配闸 / 幂等映射 / unknown_sta
 | [`db-schema.md`](db-schema.md) | **表结构唯一真相源** + 所有权声明 | 改表的人 |
 | [`api-schema.md`](api-schema.md) | **对外接口唯一真相源** + 错误码 / 幂等 / 兼容 | 改接口的人 |
 | [`dataflow.md`](dataflow.md) | 数据流向、时序、fail-closed 点、不变量 | 改链路的人 |
-| [`runbook.md`](runbook.md) | **运维手册**：就绪口径、起停、装配闸拒因、幂等映射查询、`unknown_state` 排查顺序、对账、KillSwitch、G4 演练与永久前置 | 改运行面 / 错误语义的人 |
+| [`runbook.md`](runbook.md) | **运维手册**：就绪口径、起停、装配闸拒因、幂等映射查询、`unknown_state` 排查顺序、对账、KillSwitch、G4 演练与当前阶段前置 | 改运行面 / 错误语义的人 |
 | [`TASKS.md`](TASKS.md) | 可执行任务（六字段） | 每个人 |
 | [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) | **X6c 真钱通道的开工条件与决策材料**（G7）：四处取证 / 九项不可猜的柜台事实 / 剩余范围哪一半与 SDK 无关 / P1~P5 前置 / 三个选项与触发条件 | 议 X6c 之前必读的人 |
 | [`adr/`](adr/README.md) | 架构决策（只增不删） | 提变更的人 |

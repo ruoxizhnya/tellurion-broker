@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-10
-verified-by: B 组债落账（2026-11-10，主任采纳 B）：order_acks 保留期口径（§9.7 R2）、R8 密钥形状、R9 暂不收紧；X6c 处置不变（仍 ⛔，待 D3）；此前 G7 取证 + 撤单 not_found 判据自审补正；R2 裁决 + 持久幂等映射落地（ADR 0002）；R5 申报数量纯函数（施工 ④）；X6d 按同日裁决暂缓
+verified-by: QT-45 / X6c 终态裁决（2026-11-10：`QT-45` ✅ 收口 = Mock 全绿 + fail-closed 骨架；`X6c` ⛔ → ⏸ 挂起且不计入开放项，重开条件 P1~P5 与流程见 ADR 0003）；B 组债落账（2026-11-10，主任采纳 B）：order_acks 保留期口径（§9.7 R2）、R8 密钥形状、R9 暂不收紧；此前 G7 取证 + 撤单 not_found 判据自审补正；R2 裁决 + 持久幂等映射落地（ADR 0002）；R5 申报数量纯函数（施工 ④）；X6d 按同日裁决暂缓
 ---
 
 # 架构 — tellurion-broker
@@ -12,10 +12,10 @@ verified-by: B 组债落账（2026-11-10，主任采纳 B）：order_acks 保留
 
 它出仓的时机排在最后（X6）：单账户单实例阶段，独立进程的收益（多策略共用通道、通道独立重启）兑现不了，而下单是延迟敏感路径。所以**先把 port 定好，实现先放进程内**。
 
-> **今天这一句要说全**（G7，2026-10-25）：port 侧「两个实现」今天只落了**一个半**——`Mock` 可用，`XTPTrader` 是
-> fail-closed 骨架（装配闸 + 全方法恒 `channel_down`，零 fake success）。全量适配器 **X6c 为 ⛔ 阻塞**，
+> **今天这一句要说全**（G7，2026-10-25；终态裁决 2026-11-10）：port 侧「两个实现」今天只落了**一个半**——`Mock` 可用，`XTPTrader` 是
+> fail-closed 骨架（装配闸 + 全方法恒 `channel_down`，零 fake success）。全量适配器 **X6c 已转 `⏸` 挂起**（**暂不实施**，不是永久不做），
 > 缺的是 SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗这五项外部条件（取证与触发条件见
-> [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md)），**不是**本仓漏做的一步。
+> [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md)）；**重开条件与流程见 [`adr/0003-真钱通道暂不实施与重开条件.md`](adr/0003-真钱通道暂不实施与重开条件.md)**。
 
 ## 2. 分层
 
@@ -71,10 +71,10 @@ contracts（BrokerGateway / OrderRequest / Fill）+ kit（logging/http）
 
 | 阶段 | 内容 | 前置 |
 |---|---|---|
-| X6a | port 定义 + MockTrader 🔶（2026-10-23：port / DTO / 内存 Mock / `ClientOrderID` 幂等已落 `internal/gateway`；**未接 core**） | 无 |
-| X6b | 对账口径定稿 🔶（2026-10-23 施工 ②：快照口径纯函数 + 差异注入验收已落 `internal/reconcile`；真实 broker 侧 `QuerySettlement` 归 X6c 全量） | risk 的 `QueryFills` 契约 |
-| X6c | XTPTrader 🔶（2026-10-23 施工 ②：装配闸 + fail-closed 骨架已落 `internal/gateway/xtp.go`——构造期强制注入幂等 / 对账 / 健康，缺一 error，已装配后全方法 `channel_down`；SDK 从零实现未做） | 对账 + 幂等 + 熔断三项就位 |
-| X6d | 独立进程（可选）——**2026-10-23 裁决：暂缓**，保持非目标；触发条件（多账户共用通道 / 通道级独立高可用）未到 | — |
+| X6a | port 定义 + MockTrader ✅（`internal/gateway` 全量；core 侧消费已接，2026-11-10） | 无 |
+| X6b | 对账口径定稿 ✅（快照口径纯函数 + 差异注入验收已落 `internal/reconcile`；真实 broker 侧 `QuerySettlement` 随 X6c ⏸） | risk 的 `QueryFills` 契约 |
+| X6c | XTPTrader **⏸ 挂起**（2026-11-10 终态裁决，ADR 0003）：装配闸 + fail-closed 骨架已落 `internal/gateway/xtp.go`；SDK 全量实现不投入，重开条件 = P1~P5 | 对账 + 幂等 + 熔断三项就位 |
+| X6d | 独立进程——**ADR-036（2026-10-26）取代 2026-10-23「暂缓」**：本仓按服务定位，G0 已落 `cmd/brokergateway`（`:8091`）；真实 XTP 侧随 X6c ⏸ | 多账户共用通道 / 通道级高可用 |
 
 ## 9. 接口对表（M8 前置 · ✅ 2026-10-22）
 
@@ -263,9 +263,9 @@ type HealthChecker interface {
 | **持久**幂等映射（跨重启） | ✅ `internal/ackstore` 的 `PgStore`（`broker.order_acks`，ADR 0002）；回执跨连接池回读有集成测试（`BROKER_TEST_DSN`） |
 | **并发同 ID 只出一个发送权** | ✅ `Reserve` 原子占位；内存 / PG 各有并发腿（破坏临界区后 16/16 重单，已做破坏验证） |
 | `XTPTrader` **装配闸**（构造期缺幂等 / 对账 / 健康任一 → error，即「无幂等键不接真钱」护栏） | ✅ 有测试（X6c 施工 ②）；**并拒绝 `Durable()==false` 的内存实现**（施工 ③） |
-| `XTPTrader` **全方法 fail-closed**（已装配后恒 `channel_down`，零 fake success） | ✅ 有测试；SDK 真实实现 ❌（X6c 全量：下单/撤单/查单/回报/心跳/重连/限流） |
-| 对账纯函数（快照口径 + **差异注入验收**九腿） | ✅ 有测试（X6b 施工 ②）；真实 broker 侧 `QuerySettlement` ❌（归 X6c）；对账留痕进 risk 未接（X3） |
-| core 消费方切换（旧 `LiveTrader` / `Broker` 退役） | ❌ 未做（R4） |
+| `XTPTrader` **全方法 fail-closed**（已装配后恒 `channel_down`，零 fake success） | ✅ 有测试；SDK 真实实现 ⏸（X6c 挂起，ADR 0003：下单/撤单/查单/回报/心跳/重连/限流） |
+| 对账纯函数（快照口径 + **差异注入验收**九腿） | ✅ 有测试（X6b 施工 ②）；真实 broker 侧 `QuerySettlement` ⏸（随 X6c）；对账留痕进 risk 未接（X3，跨仓腿） |
+| core 消费方切换（旧 `LiveTrader` / `Broker` 退役） | ✅ 2026-11-10（`SVC-CORE-BROKER-RETIRE`：旧实现删除 + `pkg/live` 设禁；默认通道 = broker HTTP） |
 | 申报数量规则两实现共用同一份纯函数 | 🔶 纯函数 `internal/gateway/lot` 已落、**Mock 已改调**（施工 ④）；XTP 全量适配器接入归 X6c（SDK 未做） |
 
 **七条故意取舍（都写在代码注释里，改前先读）**

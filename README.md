@@ -1,6 +1,6 @@
 # tellurion-broker
 
-> module: `tellurion-broker` ｜ 状态：**已启动（施工 ①）**——X6a 的四个 port + 内存 `Mock` 已落 `internal/gateway`；X6b（对账）、X6c（XTP）、X6d（独立进程）未做
+> module: `tellurion-broker` ｜ 状态：**服务已启动**——X6a 四 port + 内存 `Mock` + HTTP 面（G1）+ 持久幂等映射；`QT-45` ✅ 收口（终态 = Mock 全绿 + `XTPTrader` fail-closed 骨架）；`X6c`（真实 XTP 全量适配器）**⏸ 挂起**，重开条件见 [`docs/adr/0003-真钱通道暂不实施与重开条件.md`](docs/adr/0003-真钱通道暂不实施与重开条件.md)
 
 交易通道网关：`XTPTrader` / `MockTrader` = 同一 port 的两个实现。**落地前必须先有对账方案**。
 
