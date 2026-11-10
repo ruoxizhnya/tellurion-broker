@@ -93,6 +93,11 @@ func main() {
 			"version": Version,
 			"commit":  Commit,
 			"built":   BuildTime,
+			// channel 是**只读的通道性质标识**，供 core 启动期核对
+			// 「声明 live 但对端其实是 mock」这类错配。它不改变撮合行为：
+			// 本进程当前固定是内存 Mock（XTP 未接，受 X6c 阻塞）；接线真实
+			// 柜台时必须同步改成 "live"，否则 core 会拒绝把它当 live 用。
+			"channel": "mock",
 		})
 	})
 

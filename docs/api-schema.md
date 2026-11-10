@@ -9,6 +9,7 @@ verified-by: G1 施工 —— 订单/查询/对账 HTTP 面落地（§1.5）；�
 > **契约地位**：**Go port（进程内）+ 版本化 HTTP 面（`/api/broker`，2026-11-07 起）**。
 > `BrokerGateway` 按"将来可远程"设计（DTO 序列化友好），port 形态与实盘运行域同进程（下单是延迟敏感路径）；HTTP 面是**服务间调用面**（ADR-036 G1），两者共用同一份实现与同一套 DTO，见 §1.5。
 > **ADR-036（2026-10-26）已把本仓定位为服务**：G0 已落 `/healthz`、`/version`；**订单 HTTP 面已在 `SVC-BROKER-G1` 落地**；真实 XTP 的低延迟路径是否留在进程内，在 X6c 前另立 ADR 决定。
+> **通道性质标识（2026-11-11）**：`GET /version` 额外返回只读字段 `channel`（当前恒 `"mock"`），供 core 启动期核对 `BROKER_CHANNEL` 声明（声明 `live` 却读到 `mock` 即拒绝启动）。它只描述通道性质，不改变撮合行为，也不是新的业务接口；接真实柜台时须同步改为 `"live"`。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
 > **今天 vs 目标**：本仓 `internal/gateway` 已落本文四个 port + DTO + 12 哨兵 + 内存 `Mock` + `XTPTrader` fail-closed 骨架（装配闸：缺持久幂等映射 / 对账 / 健康检查任一即构造期拒绝；已装配后全方法恒 `channel_down`，零 fake success），`internal/httpapi` 已落 HTTP 面（§1.5），`internal/reconcile` 已落快照口径对账纯函数，`internal/ackstore` 已落持久幂等映射 `broker.order_acks`（2026-10-23，ADR 0002）与保留期清理（G2），**未接 core（归 G3）、无 XTP SDK 链路**；core 侧仍有 `LiveTrader`（Mock / XTP）与 `Broker`（`SimulatedBroker`）两套旧面待退役（R4）。现状矩阵与取舍见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8，八条实测事实见 §9.1（基线 core `dbe4c68`）。

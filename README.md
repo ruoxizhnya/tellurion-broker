@@ -34,6 +34,11 @@ go run ./cmd/brokergateway
 docker compose -f deploy/compose.yaml up --build
 ```
 
+`GET /version` 返回构建信息 + 只读的 `"channel": "mock"`——这是通道性质的
+唯一对外标识，core 启动期据此核对 `BROKER_CHANNEL` 声明（声明 `live` 却读到
+`mock` 会被 core 拒绝启动）。接线真实柜台时必须把该字段同步改成 `"live"`，
+否则 core 不会把它当真实柜台用。
+
 ## 边界
 
 **可以**：券商柜台适配（XTP 等）与 Mock 实现；订单/成交回报的可靠投递与幂等；与 core 的对账（日终）
