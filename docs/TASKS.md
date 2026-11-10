@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-10
-verified-by: SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`、`main:pkg/backtest/execution/port.go` EXIT=0，叠加 G1 HTTP 面已落 ⇒ 两道前置全部解除，状态 ⛔ → ⬜；施工四步逐条列明，未做一步不勾；X6c 仍 ⛔）；G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
+verified-by: QT-45 收口复核（2026-11-10：⑤ 三条判据逐条点名用例全绿，③ ① 「两实现」因 XTP 仍是 fail-closed 骨架未完成 ⇒ 🔶 → ⛔，唯一硬前置 = X6c P1~P5；同轮 core R4 退役已确认完成）；SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`、`main:pkg/backtest/execution/port.go` EXIT=0，叠加 G1 HTTP 面已落 ⇒ 两道前置全部解除，状态 ⛔ → ⬜；施工四步逐条列明，未做一步不勾；X6c 仍 ⛔）；G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -100,7 +100,7 @@ verified-by: SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`
 >
 > **如实登记**：`X6c`（真实 XTP）仍 ⛔ 不变（无 SDK / C 工具链 / 柜台网络，见 `x6c-xtp-readiness.md`）；本单是 Mock 路径的切读，不接真钱。
 
-### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] 🔶
+### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] ⛔
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
 >
@@ -173,6 +173,20 @@ verified-by: SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`
 - **④ 约束与非目标**：延迟敏感项保持进程内；不接新柜台；不改实盘下单语义。
 - **⑤ 验收**：MockTrader 全链路测试；通道拒绝与风控拒绝的错误码可区分；DTO 有契约测试。
 - **⑥ 边界**：只做交易通道；数据源 connector 在 QT-40。
+
+> **收口复核（2026-11-10，状态 🔶 → ⛔；本仓代码零改动）**
+>
+> - **⑤ 三条判据全绿（逐条点名用例）**：
+>   | ⑤ 判据 | 证据 |
+>   |---|---|
+>   | MockTrader 全链路测试 | `internal/gateway/mock_test.go` 全族（下单 / 幂等重放 / 拒单重放 / 并发同 ID 只发一笔 / 撤单 / 查单 / 成交 / 结算快照 / 清仓代次 / 通道断开 fail-closed，50 passed + 6 条 PG 腿按 DSN 门控） |
+>   | 通道拒绝与风控拒绝错误码可区分 | `errors.go` 12 哨兵；`TestPlaceOrderCounterRejection` / `TestPlaceOrderInsufficientBuyingPower` / `TestPlaceOrderChannelDown` / `TestPlaceOrderFailsClosedWithoutStore` / `TestPlaceOrderReportsUnknownWhenAckCannotBePersisted` 逐码断言 |
+>   | DTO 有契约测试 | `go.mod` 已 pin `github.com/ruoxizhnya/tellurion-contracts v0.9.0`；`internal/gateway/wire_shape_test.go:TestWireShapeUnchangedByContractMigration` 钉住 wire 形状不随契约迁移漂移 |
+> - **③ 四项状态**：② DTO 进 contracts ✅（v0.9.0）；④ paper 与实盘共用同一 `BrokerGateway` 调用面 ✅（实现层）；③ 通道规则校验与 RiskPolicy 裁决的**本仓半边** ✅（`internal/gateway/lot` 纯函数 + Mock 已接）；①「`BrokerPort` + 两实现」**未完成**——Mock 全量，XTP 仅 fail-closed 骨架（`TestXTPTrader_AllCallsFailClosedWithChannelDown`，零 fake success）。
+> - **唯一硬前置 = X6c 全量适配器**：仓内无 XTP 头文件 / `.so` / `.dll`，core 侧 `import "C"` 零命中，本机 `CGO_ENABLED=0` 且无 gcc，CI 只 checkout 本仓且无柜台网络 ⇒ `docs/x6c-xtp-readiness.md` 的 P1~P5 任一不满足即不动代码。这是外部依赖，不是「待做」。
+> - **其余跨仓项**：对账留痕进 risk（X3）未接——依赖 risk 侧接收面，属跨仓腿；core 旧 `LiveTrader` / `Broker` 退役（R4）**已于 2026-11-10 完成**（core `SVC-CORE-BROKER-RETIRE`：`MockTrader` / `SimulatedBroker` / `PostgresOrderStore` / `pkg/trading/broker/xtp` 删除，`tellurion/pkg/live` 全仓设禁），不再是本单未落项。
+> - **为什么不翻 ✅**：① 的字面要求是「两实现」，XTP 仍是骨架；把骨架当实现标 ✅ 等于把 ⛔ 的 X6c 抹掉。**提前置条件解除条件**：P1~P5 满足（拿到 SDK + C 工具链 + 柜台测试环境）后再开 X6c 施工单。
+> - **门禁（本轮真实输出）**：`gofmt -l .` 空、`go build ./...` = 0、`go vet ./...` = 0、`go test ./... -count=1` = 0（PG 集成腿无 DSN 按设计 skip）。
 
 
 ---
