@@ -2,13 +2,13 @@
 
 > module: `tellurion-broker` ｜ 状态：**服务已启动**——X6a 四 port + 内存 `Mock` + HTTP 面（G1）+ 持久幂等映射；`QT-45` ✅ 收口（终态 = Mock 全绿 + `XTPTrader` fail-closed 骨架）；`X6c`（真实 XTP 全量适配器）**⏸ 挂起**，重开条件见 [`docs/adr/0003-真钱通道暂不实施与重开条件.md`](docs/adr/0003-真钱通道暂不实施与重开条件.md)
 
-交易通道网关：`XTPTrader` / `MockTrader` = 同一 port 的两个实现。**落地前必须先有对账方案**。
+交易通道网关：`Mock` / `XTPTrader` = 同一 port 的两个实现（`MockTrader` 是 core 旧名，已随 2026-11-10 退役）。**落地前必须先有对账方案**。
 
 ## 目录
 
 | 路径 | 内容 |
 |---|---|
-| `cmd/brokergateway/` | 网关服务进程入口（`127.0.0.1:8091`；G0 只暴露 `/healthz` / `/version`，订单 HTTP 面归 G1） |
+| `cmd/brokergateway/` | 网关服务进程入口（`127.0.0.1:8091`；`/healthz` / `/version` + `/api/broker/*` 订单/查询/对账面，G0/G1 均已落） |
 | `internal/gateway/` | `BrokerGateway` / `SettlementQuerier` / `KillSwitch` / `HealthChecker` port + DTO + `Mock`（X6a） |
 | `docs/` | 本仓文档：台账 / 边界 / 决策 / 归档 —— 从这里进：`docs/README.md` |
 | `AGENTS.md` | 本仓入口（构建、边界、禁止、依赖版本） |
@@ -24,7 +24,7 @@ go test ./...
 
 本仓**单独 checkout 就能跑通**上面三条。需要别的仓源码才过 → 边界错了，不是加 `replace` 能解决的问题。
 
-跑起来（G0 = Mock 网关，只探活/版本）：
+跑起来（Mock 网关：探活 / 版本 + `/api/broker` 订单面）：
 
 ```bash
 # 本机直跑（默认 127.0.0.1:8091）

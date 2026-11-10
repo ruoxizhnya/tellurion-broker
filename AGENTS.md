@@ -4,7 +4,7 @@
 
 ## 1. 这是什么仓
 
-交易通道网关：`XTPTrader` / `MockTrader` = 同一 port 的两个实现。**落地前必须先有对账方案**。
+交易通道网关：`Mock` / `XTPTrader` = 同一 port 的两个实现（`MockTrader` 是 core 旧名，已随 2026-11-10 退役）。**落地前必须先有对账方案**。
 
 **状态**：已启动（2026-10-24 施工 ④ ＋ 2026-10-25 施工 ⑤ = G7）——X6a 四 port + 内存 `Mock` 已落 `internal/gateway`；X6b 对账纯函数（快照口径 + 差异注入验收）已落 `internal/reconcile`；X6c 装配闸 + fail-closed 骨架 + **持久幂等映射 `broker.order_acks`**（`internal/ackstore`，ADR 0002）已落；R5 申报数量纯函数（`internal/gateway/lot`）已落并让 Mock 共用；**X6c 全量适配器 ⏸ 挂起**（2026-11-10 主任授权、执行侧裁定：**暂不投入真钱通道实施**，本阶段终态 = Mock 全绿 + fail-closed 骨架；不是永久不做，重开条件 = P1~P5 同时满足后另立施工单 + 真钱形态 ADR，见 `docs/adr/0003-真钱通道暂不实施与重开条件.md` 与 `docs/x6c-xtp-readiness.md` §12）；R10（映射读失败报成 `channel_down`）已落（2026-11-07），R9 已裁暂不收紧 + R8 密钥形状已定 + `order_acks` 保留期口径已定（2026-11-10，B 组债，见 `docs/x6c-xtp-readiness.md` §11）；`broker.order_acks` 的 G2（部分索引 + **90 天暂定**保留期，只删 `ack IS NOT NULL`，单批 ≤ 5000，进程内 24h 清理）代码已落、PG 集成腿已真跑（9 条全 PASS，2026-11-07）；G1 订单/查询/对账 HTTP 面已落（`/api/broker`，写侧 `BROKER_SERVICE_TOKEN`，未设即关闭写面），**core 侧消费已切到本仓 HTTP 面**（2026-11-10，`SVC-CORE-BROKER-RETIRE`：core 默认通道 = broker HTTP，`BROKER_URL` 缺失即装配失败，旧进程内 MockTrader 已删除）；G4 失败语义六类 + 就绪口径（`/healthz` 唯一探针，就绪 = 装配闸通过）+ `docs/runbook.md` + 内存演练 + **真 PG 停库→恢复演练**已落（2026-11-07 ✅）；**X6d 已由 ADR-036（2026-10-26）取代**——本仓定位为**服务**，G0 已落 `cmd/brokergateway`（`/healthz`、`/version`）+ `Dockerfile` + `deploy/compose.yaml`（`:8091`）；订单 HTTP 面已在 `SVC-BROKER-G1` 落地；真实 XTP 仍 ⛔（X6c）；**QT-45 已收口 ✅（2026-11-10）：终态 = Mock 全链路全绿 + `XTPTrader` fail-closed 骨架 + 装配闸 + DTO 契约测试；「XTP 全量适配器」转 X6c 挂起项（不计入开放项），逐条证据见 `docs/TASKS.md` QT-45 终态落账与 `docs/adr/0003-真钱通道暂不实施与重开条件.md`**
 

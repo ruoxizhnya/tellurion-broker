@@ -17,7 +17,7 @@ verified-by: QT-45 / X6c 终态裁决（2026-11-10：主任授权执行侧裁定
 ### X6c · 真钱通道（XTP 全量适配器）[P1] ⏸（外部依赖）
 
 - **① 目标**：把 `XTPTrader` 从 fail-closed 骨架做成可上真钱的适配器。
-- **② 上下文**：`docs/adr/0003-真钱通道暂不实施.md`（2026-11-10 裁决）定本阶段终态 = Mock 全链路全绿 + `XTPTrader` fail-closed 骨架（零 fake success）+ 装配闸；阻塞条件见 `docs/x6c-xtp-readiness.md` §4 的 P1~P5（SDK / C 工具链 / 柜台网络 / 测试账号 / 可盯盘时间窗）。
+- **② 上下文**：`docs/adr/0003-真钱通道暂不实施与重开条件.md`（2026-11-10 裁决）定本阶段终态 = Mock 全链路全绿 + `XTPTrader` fail-closed 骨架（零 fake success）+ 装配闸；阻塞条件见 `docs/x6c-xtp-readiness.md` §4 的 P1~P5（SDK / C 工具链 / 柜台网络 / 测试账号 / 可盯盘时间窗）。
 - **③ 要求**：重开时按 ADR 写死的流程：① P1~P5 逐项取证；② 立 X6c 施工单（下单/撤单/查单/回报/心跳/重连/限流 + 柜台错误码映射 + 真实 `QuerySettlement`）；③ 立真钱形态 ADR；④ ADR-0003 标 `Superseded by 000N`。
 - **④ 约束与非目标**：重开前禁止任何「已支持实盘」表述；B 组债务（保留期 90 天占位、R8 密钥形状、R9 暂不收紧）与 C 组接入验收清单**原样作为准入清单**，不得丢失。
 - **⑤ 验收**：ADR-0003 的重开流程四步全部完成。

@@ -4,7 +4,8 @@
 // internal/gateway 的 port 实现里；本包不裁决、不改单、不持有状态。
 //
 // 写侧（下单 / 撤单 / 紧急清仓）要求 service token；读侧（查单 / 持仓 /
-// 账户 / 成交 / 对账）是本机服务面，不做鉴权（G4 再定就绪与鉴权矩阵）。
+// 账户 / 成交 / 对账）是本机服务面，不做鉴权（G4 已收口：就绪只看装配闸，
+// 见 docs/api-schema.md §1.6）。
 package httpapi
 
 import (

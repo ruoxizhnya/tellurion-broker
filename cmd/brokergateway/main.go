@@ -1,11 +1,13 @@
-// Command brokergateway 是 tellurion-broker 的最小服务入口（ADR-036 G0）。
+// Command brokergateway 是 tellurion-broker 的服务入口（ADR-036 G0/G1）。
 //
-// 定位：交易网关服务。G0 只暴露健康/版本面，证明本仓可独立构建、启动、被探活；
-// 订单/撤单/查单/持仓/对账的 HTTP 面归 SVC-BROKER-G1，届时复用 internal/gateway
-// 的 BrokerGateway / SettlementQuerier / KillSwitch / HealthChecker 四个 port。
+// 暴露三块面：`/healthz`（唯一探针，就绪 = 装配闸通过）、`/version`（含只读
+// `channel` 标识，供 core 启动期核对）以及挂载在 `/api/broker/` 下的订单 /
+// 查询 / 对账 HTTP 面（SVC-BROKER-G1；写侧要求 `BROKER_SERVICE_TOKEN`，未设
+// 即关闭写面）。HTTP 面复用 internal/gateway 的 BrokerGateway /
+// SettlementQuerier / KillSwitch / HealthChecker 四个 port。
 //
-// 本进程不接真实柜台：XTP 全量适配器仍受 X6c 阻塞；Mock 只做转发与确认，
-// 不做风控裁决，不持有订单真相。
+// 本进程不接真实柜台：XTP 全量适配器按 ADR 0003 ⏸ 挂起；Mock 只做转发与
+// 确认，不做风控裁决，不持有订单真相。
 package main
 
 import (

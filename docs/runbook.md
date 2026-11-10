@@ -1,12 +1,12 @@
 ---
 status: active
-last-verified: 2026-11-07
-verified-by: G4 施工（失败语义 / 就绪口径 / KillSwitch 姿态 / 演练；真 PG 腿 2026-11-07 补跑）
+last-verified: 2026-11-11
+verified-by: 2026-11-11 文档对齐审计（G3 已收口 / core 已切本仓 HTTP，校准 §6 对账两侧口径与 X6c 状态标记）；此前 G4 施工（失败语义 / 就绪口径 / KillSwitch 姿态 / 演练；真 PG 腿 2026-11-07 补跑）
 ---
 
 # Runbook — tellurion-broker 网关运维
 
-> 适用对象：`cmd/brokergateway`（今天只装配 **Mock**；真实 XTP 仍被 X6c ⛔ 阻塞）。
+> 适用对象：`cmd/brokergateway`（今天只装配 **Mock**；真实 XTP 由 X6c ⏸ 挂起，见 §9）。
 > 本文的所有命令都在**仓库根目录**、Windows PowerShell 5 下执行；每条命令前先做一次环境准备：
 
 ```powershell
@@ -98,7 +98,7 @@ SELECT account_id,
        client_order_id,
        ack IS NOT NULL                       AS has_ack,
        left(request_fingerprint, 12)         AS fingerprint_prefix,
-       created_at,
+       reserved_at,
        updated_at
 FROM broker.order_acks
 WHERE account_id = '<account>'
@@ -165,7 +165,7 @@ curl.exe -s -w ' HTTP=%{http_code}' http://127.0.0.1:8091/api/broker/orders/<cli
 口径是**账户快照**（现金 / 持仓 / 费用），不是逐笔成交；实现是纯函数 `internal/reconcile.Reconcile(local, broker *gateway.AccountSnapshot, cfg)`：
 
 - `broker` 侧：`QuerySettlement(ctx, accountID, asOf)`（HTTP：`GET /api/broker/accounts/{id}/settlement?as_of=RFC3339`）。
-- `local` 侧：core 组装后传入（今天 core 消费未接，归 `SVC-BROKER-G3` ⛔）。
+- `local` 侧：core 组装后传入（core 已于 2026-11-10 切到本仓 HTTP 面，`SVC-BROKER-G3` ✅；对账装配仍是 `traderAccountView` 自检——local 与 broker 同源，差异恒零）。
 - 输出七类差异 × 三级严重度：`cash` / `missing_local` / `missing_broker` / `quantity` / `market_value` / `fee` / `as_of_drift`；`critical` 立即人工核查，`warning` 当日预警，`info` 只留痕。
 - 容差默认（`reconcile.DefaultConfig()`）：现金 0.01、数量 0、市值相对 0.5%（仅数量相符时比）、费用 0.01、快照时间漂移 60s。
 - nil 快照 / 账户不一致 / 同一侧重复 symbol 都是 fail-loud，返回 error，不静默跳过。
@@ -176,7 +176,7 @@ curl.exe -s -w ' HTTP=%{http_code}' http://127.0.0.1:8091/api/broker/orders/<cli
 go test ./internal/reconcile -count=1 -v
 ```
 
-**未执行 / 未接通**：真实 broker 侧 `QuerySettlement`（X6c ⛔）；core 本地快照组装与差异投递 risk（X3 / G3 ⛔）。所以今天不要声称“对账已上线”；这条命令只证明口径与差异分类可用。
+**未执行 / 未接通**：真实券商侧 `QuerySettlement`（X6c ⏸）；差异投递 risk 的留痕（X3）。core 侧消费与对账装配已随 `SVC-BROKER-G3` ✅（2026-11-10）接线，但仍是自检形态。所以今天不要声称“对账已上线”；这条命令只证明口径与差异分类可用。
 
 ## 7. KillSwitch（紧急清仓）触发、解除与留痕
 

@@ -8,7 +8,7 @@ verified-by: QT-45 / X6c 终态裁决（2026-11-10：`QT-45` ✅ 收口 = Mock �
 
 ## 1. 定位
 
-交易通道网关：`XTPTrader` / `MockTrader` = **同一个 port 的两个实现**。
+交易通道网关：`Mock` / `XTPTrader` = **同一个 port 的两个实现**（`MockTrader` 是 core 旧名，已随 2026-11-10 退役）。
 
 它出仓的时机排在最后（X6）：单账户单实例阶段，独立进程的收益（多策略共用通道、通道独立重启）兑现不了，而下单是延迟敏感路径。所以**先把 port 定好，实现先放进程内**。
 
@@ -21,12 +21,12 @@ verified-by: QT-45 / X6c 终态裁决（2026-11-10：`QT-45` ✅ 收口 = Mock �
 
 ```
 core（订单意图）
-      ↓  BrokerGateway（port，进程内）
-适配器层
-  ├── MockTrader  → 内存 / 文件
-  └── XTPTrader   → 券商柜台（最小单位/委托类型/限流在适配器内）
+      ↓  BrokerGateway（HTTP `/api/broker`；port 形态仍可在同进程装配）
+本仓（服务 + 适配器）
+  ├── Mock        → 内存（开发 / 回放）
+  └── XTPTrader   → 券商柜台（最小单位/委托类型/限流在适配器内；X6c ⏸）
       ↓
-成交回报 / 持仓 ──► core 的 quant（实盘运行域；将来建 exec 镜像须先立 ADR）
+成交回报 / 持仓 ──► core 的运行域（今天 core `pkg/trading`；将来建 exec 镜像须先立 ADR）
       └── QuerySettlement（账户快照）──► 对账（risk 留痕）
 ```
 
@@ -65,7 +65,7 @@ contracts（BrokerGateway / OrderRequest / Fill）+ kit（logging/http）
 - 不做风控、不做策略、不做撮合
 - 不持有订单真相
 - 不做资金划转
-- 现在不做独立进程（触发条件：多账户共用通道 / 通道级独立高可用）。X6d 于 2026-10-23 裁决**暂缓**，见 `TASKS.md`。
+- ~~现在不做独立进程~~ —— **ADR-036（2026-10-26）已取代该裁决**：本仓按**服务**定位，`cmd/brokergateway` + `Dockerfile` + `deploy/compose.yaml`（`:8091`）已落；真实 XTP 侧的进程拓扑随 X6c ⏸（见 §8）。
 
 ## 8. 分期与状态
 
@@ -79,11 +79,11 @@ contracts（BrokerGateway / OrderRequest / Fill）+ kit（logging/http）
 ## 9. 接口对表（M8 前置 · ✅ 2026-10-22）
 
 > **本节是什么**：`tellurion:docs/TASKS.md`「五、X 线」公共前置 ② 要求的**接口对表本体**（模板 = `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1）。逐个 port / DTO / 调用面列 **签名 + 错误语义 + 版本策略**；缺一列就是没对完表。
-> **本仓不是 HTTP 服务**：`api-schema.md` 的「接口面」是 **Go port（进程内）**，所以本节 C 组按**调用面 × 错误/幂等矩阵**组织，不按 HTTP 端点。
+> **本节的「今天」是历史基线**：本节写于 ADR-036（2026-10-26）之前，描述的是 core `dbe4c68` 的进程内 port 形态与当时的两套旧面。**2026-11-07 起本仓已是 HTTP 服务**（§8 G0/G1），**2026-11-10 core 旧实现已删除**（`SVC-CORE-BROKER-RETIRE`）——本节继续作为「为什么这样定契约」的取证材料，**不要据本节判断现状**（现状看 §8 与 `api-schema.md` §1.5）。C 组仍按**调用面 × 错误/幂等矩阵**组织。
 > **实测基线**：core `dbe4c68`（2026-10-22）。行号一律取 `git show HEAD:<path>`。复核：`git -C ../tellurion show HEAD:<path> | sed -n '<line>p'`。
-> **列口径**：「今天」= 源码实测；「契约位」= contracts 的落点（`BrokerGateway` / 新 DTO **不随 S1 批量迁**，contracts 已登记「未定形 / S1 不落」，随 X6a 定稿）；「版本策略」按 QT-19 的 MAJOR / MINOR / PATCH 判定。
-> **归属口径**：本仓是 **port 实现的物理归属，不是常驻服务**（`tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2）：柜台适配（XTP / Mock）与日终对账写在本仓，**port 由消费侧（core）定义最终形状、DTO 落 contracts**，下单与裁决留在 core。
-> **M5 口径**：六仓 ≠ 六进程（`tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2）。本仓今天不升格容器；**X6a/X6b 只在 core 进程内接 port**，X6d 独立进程是多账户/高可用的触发式选项，不是本单目标。
+> **列口径**：「今天」= 源码实测（基线 core `dbe4c68`）；「契约位」= wire DTO 已在 `tellurion-contracts/broker` v0.9.0（2026-11-09 CT-05 收编），Go port 方法集仍住本仓 `internal/gateway`；「版本策略」按 QT-19 的 MAJOR / MINOR / PATCH 判定。
+> **归属口径（ADR-036 后修订）**：本仓是**服务 + 通道适配**的物理归属——`cmd/brokergateway` 常驻（`:8091`），四个 port 的实现与日终对账写在本仓；**wire DTO 落 contracts**，下单与风控裁决留在 core。
+> **M5 口径（已被 ADR-036 取代）**：六仓 ≠ 六进程（`tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2）。写本节时本仓尚未升格容器、X6a/X6b 只在 core 进程内接 port；**2026-10-26 ADR-036 已把本仓定为服务**——G0 落 `cmd/brokergateway` + Dockerfile/deploy（`:8091`），G1 落订单/查询/对账 HTTP 面。
 > **D1/M8 口径**：真实券商（XTP）**今天未接**；`XTPTrader` 是 offline skeleton。本节把「两实现的语义」写成目标契约，并如实标出 skeleton 与目标的差距（F4/F8）。
 
 ### 9.1 八条前置事实（每条都会改变施工判断）

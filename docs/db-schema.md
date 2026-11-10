@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-07
-verified-by: G2 施工 —— `broker.order_acks` 部分索引 + 90 天保留期清理落地；此前 R2 裁决 + `broker.order_acks` 落地（ADR 0002 / X6c 幂等持久化）
+last-verified: 2026-11-11
+verified-by: 2026-11-11 文档对齐审计 —— 校准 §3-4 引用的 core 旧文件行号（`pkg/live/broker/xtp` 已于 2026-11-10 删除）与实现命名（`Mock` / core 旧名 `MockTrader`）；此前 G2 施工（部分索引 + 90 天保留期清理）、R2 裁决 + `broker.order_acks`（ADR 0002）
 ---
 
 # DB Schema — tellurion-broker
@@ -69,10 +69,10 @@ CREATE INDEX IF NOT EXISTS order_acks_updated_at_acked_idx
 
 ## 3. 红线
 
-1. **真钱红线**：没有对账 + 幂等 + 熔断之前，只允许 `MockTrader`；`XTPTrader` 的构造期必须**强制注入** `SettlementQuerier` + 持久幂等映射 + `HealthChecker`，缺一返回 error（不是 warning）。持久性由 `AckStore.Durable()` 机械判定——`MemoryAckStore` 会被拒绝。
+1. **真钱红线**：没有对账 + 幂等 + 熔断之前，只允许 Mock（本仓实现名 `Mock`；core 旧名 `MockTrader` 已随 2026-11-10 退役）；`XTPTrader` 的构造期必须**强制注入** `SettlementQuerier` + 持久幂等映射 + `HealthChecker`，缺一返回 error（不是 warning）。持久性由 `AckStore.Durable()` 机械判定——`MemoryAckStore` 会被拒绝。
 2. **禁止明文密钥**：账户/密码/证书走环境或密钥管理；代码与库里都不能出现；`Config.Password` 在序列化 / 日志路径必须脱敏（R8）。
 3. **归一化纪律**：券商特有字段在适配器内消化，**不许泄漏进契约**（`BusinessType` 等）。
-4. **校验分界**：最小单位 / 委托类型 / 柜台限流 / **交易所申报数量规则**归网关（通道侧纯函数，两实现共用）；数量上限 / 集中度 / T+1 / 止损归 `RiskPolicy`。混用即是 bug（现状 `pkg/live/broker/xtp/xtp.go:387`：规则住在 risk 包、只有 XTP 调用，R5）。
+4. **校验分界**：最小单位 / 委托类型 / 柜台限流 / **交易所申报数量规则**归网关（通道侧纯函数，两实现共用）；数量上限 / 集中度 / T+1 / 止损归 `RiskPolicy`。混用即是 bug（历史基线：core `pkg/live/broker/xtp/xtp.go:387` 调 `risk.ValidateOrderQuantity`，该文件已于 2026-11-10 删除；规则本体 `tellurion:pkg/risk/lot.go:136` **尚未退役**，R5 的跨仓腿仍在）。
 5. **下单幂等**：`(AccountID, ClientOrderID)` 是幂等键；**发送权由 `AckStore.Reserve` 原子判定**（并发同 ID 只能出一个 winner）；同 ID 同载荷 → 原 ack 不发送；同 ID 不同载荷 → `duplicate_order`；重复提交不得重复下单。
 6. **禁止伪造成功**：未实现的能力返回 `not_supported` / `channel_down`，任何路径不得返回「成功形状」（现状 `EmergencyFlatten` 反例见 `ARCHITECTURE.md` §9.1 F4）。
 

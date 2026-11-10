@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-23
-verified-by: R2 裁决 + 持久幂等映射落地（ADR 0002 / X6c 幂等持久化）
+last-verified: 2026-11-11
+verified-by: 2026-11-11 文档对齐审计 —— 主链路校准为 HTTP 服务面与 `Mock` 实现名；旧面（`LiveTrader` / `Broker`）已随 2026-11-10 退役，§9.1 降为历史基线
 ---
 
 # Dataflow — tellurion-broker
@@ -12,21 +12,22 @@ verified-by: R2 裁决 + 持久幂等映射落地（ADR 0002 / X6c 幂等持久�
 
 ```
 core（订单意图 → RiskPolicy.CheckOrder 已裁决）
-        │  PlaceOrder(OrderRequest{ClientOrderID, …}) —— 进程内 port
+        │  PlaceOrder(OrderRequest{ClientOrderID, …})
+        │  传输 = HTTP `/api/broker/orders`（ADR-036 G1；port 形态仍可在同进程装配）
         ↓
-  tellurion-broker（适配器）
-        ├── MockTrader  ──► 内存 / 文件（开发、回放）
-        └── XTPTrader   ──► 券商柜台 ──► 委托回报 / 成交回报
+  tellurion-broker（服务 + 适配器）
+        ├── Mock      ──► 内存（开发、回放；无价格不成交）
+        └── XTPTrader ──► 券商柜台 ──► 委托回报 / 成交回报（X6c ⏸）
         ↓
   OrderAck / OrderState（受理 ≠ 成交）
         │
-        └──► core 的 quant（实盘运行域：订单 / 成交 / 持仓）
+        └──► core 的运行域（订单 / 成交 / 持仓；今天 core `pkg/trading`）
                 │
                 ├── QueryFills ──► 成交 / 费用审计（不是对账输入）
                 └── QuerySettlement（账户快照）──► 对账 ──► risk 的对账留痕
 ```
 
-> 目标 port 见 [`api-schema.md`](api-schema.md) §1；今天的两套旧面（`LiveTrader` / `Broker`）与三个实现见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.1 F1。**对账输入是账户快照，不是逐笔成交**（F6）：设计文档旧写的 `QueryFills → 对账` 与代码不符。
+> 目标 port 见 [`api-schema.md`](api-schema.md) §1；本仓今天的实现是 `internal/gateway` 的 `Mock`（可用）与 `XTPTrader`（fail-closed 骨架，X6c ⏸）。core 的两套旧面（`LiveTrader` / `Broker`）与三个旧实现已于 2026-11-10 随 `SVC-CORE-BROKER-RETIRE` 删除；[`ARCHITECTURE.md`](ARCHITECTURE.md) §9.1 F1~F8 是**删除前的历史基线**（core `dbe4c68`），不是现状。**对账输入是账户快照，不是逐笔成交**（F6）：设计文档旧写的 `QueryFills → 对账` 与代码不符。
 
 ## 2. 关键时序
 

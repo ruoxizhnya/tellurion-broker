@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-07
-verified-by: G1 施工 —— 订单/查询/对账 HTTP 面落地（§1.5）；此前 G7（施工 ⑤）撤单 `order_not_found` 判据、R2 裁决（ADR 0002）
+last-verified: 2026-11-11
+verified-by: 2026-11-11 文档对齐审计 —— G3 已收口 / core 旧面已删，校准 §1 现状段与实现矩阵、§1.5.1 读侧鉴权口径、§4 旧面行；此前 G1 施工（§1.5）、G7（施工 ⑤）撤单 `order_not_found` 判据、R2 裁决（ADR 0002）
 ---
 
 # API Schema — tellurion-broker
@@ -12,8 +12,8 @@ verified-by: G1 施工 —— 订单/查询/对账 HTTP 面落地（§1.5）；�
 > **通道性质标识（2026-11-11）**：`GET /version` 额外返回只读字段 `channel`（当前恒 `"mock"`），供 core 启动期核对 `BROKER_CHANNEL` 声明（声明 `live` 却读到 `mock` 即拒绝启动）。它只描述通道性质，不改变撮合行为，也不是新的业务接口；接真实柜台时须同步改为 `"live"`。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
-> **今天 vs 目标**：本仓 `internal/gateway` 已落本文四个 port + DTO + 12 哨兵 + 内存 `Mock` + `XTPTrader` fail-closed 骨架（装配闸：缺持久幂等映射 / 对账 / 健康检查任一即构造期拒绝；已装配后全方法恒 `channel_down`，零 fake success），`internal/httpapi` 已落 HTTP 面（§1.5），`internal/reconcile` 已落快照口径对账纯函数，`internal/ackstore` 已落持久幂等映射 `broker.order_acks`（2026-10-23，ADR 0002）与保留期清理（G2），**未接 core（归 G3）、无 XTP SDK 链路**；core 侧仍有 `LiveTrader`（Mock / XTP）与 `Broker`（`SimulatedBroker`）两套旧面待退役（R4）。现状矩阵与取舍见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8，八条实测事实见 §9.1（基线 core `dbe4c68`）。
-> **port 的落点**：契约位是 **contracts**（`BrokerGateway` / 新 DTO 不随 S1 批量迁，随 X6a 定稿）。
+> **今天 vs 目标**：本仓 `internal/gateway` 已落本文四个 port + DTO + 12 哨兵 + 内存 `Mock` + `XTPTrader` fail-closed 骨架（装配闸：缺持久幂等映射 / 对账 / 健康检查任一即构造期拒绝；已装配后全方法恒 `channel_down`，零 fake success），`internal/httpapi` 已落 HTTP 面（§1.5），`internal/reconcile` 已落快照口径对账纯函数，`internal/ackstore` 已落持久幂等映射 `broker.order_acks`（2026-10-23，ADR 0002）与保留期清理（G2），**无 XTP SDK 链路**；core 侧旧面（`LiveTrader` / `Broker` / `SimulatedBroker` 三个旧实现）已于 **2026-11-10** 随 `SVC-CORE-BROKER-RETIRE` 删除，core 默认通道 = 本仓 HTTP 面（`tellurion:pkg/brokerhttp`）。现状矩阵与取舍见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8，八条实测事实见 §9.1（**历史基线** core `dbe4c68`，删除前的取证留档）。
+> **port 的落点**：wire 形状（订单 / 成交 / 持仓 / 账户 / 紧急清仓）已于 **2026-11-09** 收编 `tellurion-contracts/broker` v0.9.0（CT-05），本仓 `internal/gateway/model.go` 只留类型别名；`BrokerGateway` 等 Go port 方法集仍住本仓 `internal/gateway`。
 > **ADR-036（2026-10-26）后本仓是服务**：G0 已落 `cmd/brokergateway`（`/healthz`、`/version`）+ Dockerfile/deploy（`:8091`）；G1 已落订单/查询/对账 HTTP 面（§1.5）。
 
 ## 1. 接口面（目标 port）
@@ -53,14 +53,16 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 
 | 实现 | port | 用途 | 现状 |
 |---|---|---|---|
-| `Mock`（`internal/gateway`） | `BrokerGateway` + `SettlementQuerier` + `KillSwitch` + `HealthChecker` | 本仓的新 MockTrader | **可用**（X6a）；注入式 `AckStore`，nil 即不发送；无价格不成交；申报数量走 `internal/gateway/lot` 纯函数（R5） |
+| `Mock`（`internal/gateway`） | `BrokerGateway` + `SettlementQuerier` + `KillSwitch` + `HealthChecker` | 本仓的实现（`MockTrader` 是 core 旧名，已删） | **可用**（X6a）；注入式 `AckStore`，nil 即不发送；无价格不成交；申报数量走 `internal/gateway/lot` 纯函数（R5） |
 | `XTPTrader`（`internal/gateway`，本仓） | 四个 port + `KillSwitch` | 真实柜台（X6c） | **fail-closed 骨架 + 装配闸**：构造期缺 `AckStore` / `SettlementQuerier` / `HealthChecker` 任一，或 `AckStore.Durable()==false` → `ErrAssemblyIncomplete`（构造路径哨兵，**不是第 13 个 wire code**）；已装配后所有方法恒 `channel_down`；SDK 从零实现未做 |
 | `PgStore`（`internal/ackstore`） | `AckStore`（装配 SPI，非四个 wire port） | 持久幂等映射（R2 已裁） | **可用**：`broker.order_acks`，原子 `Reserve`（`ON CONFLICT DO NOTHING`）+ 回执写回 + `Durable=true`；PG 集成测试按 `BROKER_TEST_DSN` 运行 |
 | `MemoryAckStore`（`internal/gateway`） | `AckStore` | 开发 / 测试 | 可用；**`Durable=false`**，进不了 XTP 装配闸 |
 | `Reconcile`（`internal/reconcile`） | 纯函数（非 port） | 快照口径对账（X6b） | **可用**；输入两侧共用 `AccountSnapshot`，七类差异 × 三级严重度，差异注入验收在册；真实 broker 侧快照归 X6c 全量 |
-| `MockTrader` | `LiveTrader`（旧） | 开发 / 回放 / 压测 | 可用；**无编译期断言**，且不做板块申报规则校验 |
-| `XTPTrader`（旧，core `pkg/live/broker/xtp`） | `LiveTrader`（旧） | 真实柜台 | **offline skeleton**：`Connect`/`SubmitOrder`/`CancelOrder` 恒返回「SDK not linked」；`EmergencyFlatten` 伪造成功 |
-| `SimulatedBroker` | `Broker`（旧，另一套面） | `LiveEngine` 测试替身 | 生产零调用方（AUD-34）；去留见 §9.7 R4 |
+| `MockTrader`（旧，core `pkg/live`） | `LiveTrader`（旧） | 开发 / 回放 / 压测 | **已删除**（2026-11-10，`SVC-CORE-BROKER-RETIRE`）；删除前无编译期断言、不做板块申报规则校验 |
+| `XTPTrader`（旧，core `pkg/live/broker/xtp`） | `LiveTrader`（旧） | 真实柜台 | **已删除**（2026-11-10，`SVC-CORE-BROKER-RETIRE`）；删除前是 offline skeleton（`Connect`/`SubmitOrder`/`CancelOrder` 恒返回「SDK not linked」）且 `EmergencyFlatten` 伪造成功（F4 历史基线） |
+| `SimulatedBroker`（旧，core） | `Broker`（旧，另一套面） | `LiveEngine` 测试替身 | **已删除**（2026-11-10，`SVC-CORE-BROKER-RETIRE`）；生产零调用方（AUD-34），去留曾登记为 R4 |
+
+> 上表后三行是 **2026-11-10 前的 core 旧面**，只作历史基线留档；本仓今天的实现只有前四行（`Mock` / `XTPTrader` / `PgStore` / `MemoryAckStore`）+ `reconcile` 纯函数。
 
 ### 校验归属（必须分开，不能混）
 
@@ -89,7 +91,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 | `GET` | `/api/broker/accounts/{accountID}/settlement?as_of=RFC3339` | 对账快照（→ `AccountSnapshot`） | 否 |
 | `POST` | `/api/broker/emergency-flatten` | 紧急清仓（body `{"reason":string}` → `EmergencyFlattenResult`） | 是 |
 
-**鉴权**：写侧要求 `Authorization: Bearer $BROKER_SERVICE_TOKEN`（常量时间比较）。**环境变量未设 = 写侧关闭**（`503 writes_disabled`），不是"不校验"；token 不匹配 = `401 unauthorized`。读侧是本机服务面，G1 不做鉴权（G4 的就绪/鉴权矩阵再定）。
+**鉴权**：写侧要求 `Authorization: Bearer $BROKER_SERVICE_TOKEN`（常量时间比较）。**环境变量未设 = 写侧关闭**（`503 writes_disabled`），不是"不校验"；token 不匹配 = `401 unauthorized`。读侧是本机服务面，**不鉴权**（G4 已收口：就绪只看装配闸，见 §1.6；本仓不引 kit 鉴权适配器，引入读侧鉴权须另立单）。
 
 **幂等**：键仍是 `(account_id, client_order_id)`，与 port 形态完全一致；重放返回**原回执**且 `idempotent_replay=true`。传输层不另造幂等键。
 
@@ -232,7 +234,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 | `QuerySettlement` 快照口径 | frozen | 从快照改逐笔 = MAJOR |
 
 - 柜台适配器可独立升级，**不得**把券商特有字段泄漏进契约（`OrderReq.BusinessType` 留在 XTP 适配器内部）。
-- 旧 `LiveTrader` / `Broker` 标 **deprecated**，随 X6a 迁移删除（core 内部，MAJOR）。
+- 旧 `LiveTrader` / `Broker` / `SimulatedBroker` 已于 **2026-11-10** 随 `SVC-CORE-BROKER-RETIRE` 删除（core 内部；删除属 MAJOR，已在 core 仓落账）。
 
 ## 5. 不提供什么（边界）
 
