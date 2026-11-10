@@ -44,10 +44,12 @@ $tmp = Join-Path $env:TEMP 'tellurion-broker-g4'
 New-Item -ItemType Directory -Force $tmp | Out-Null
 go build -o (Join-Path $tmp 'brokergateway.exe') ./cmd/brokergateway
 $env:BROKER_SERVICE_TOKEN = 'g4-token'
-$p = Start-Process -FilePath (Join-Path $tmp 'brokergateway.exe') -ArgumentList '-addr','127.0.0.1:18091' -PassThru
+$p = Start-Process -FilePath (Join-Path $tmp 'brokergateway.exe') -ArgumentList '-addr','127.0.0.1:18091','-account-id','acc-mock','-mock-prices','000001=12.5,600000=8.2,002594=30.1' -PassThru
 Start-Sleep -Seconds 1
 Invoke-RestMethod -Uri http://127.0.0.1:18091/healthz
 ```
+
+`-mock-prices` 是 Mock 的参考价表（`SYM=PX`，逗号分隔）。**不给参考价时市价单只停在 `accepted`**——这是既定语义（受理 ≠ 成交），不是故障；要演练成交/对拍（`SVC-BROKER-G3` 真进程腿）必须喂价。
 
 停止：
 

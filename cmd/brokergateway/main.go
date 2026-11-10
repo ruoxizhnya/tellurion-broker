@@ -12,10 +12,13 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,7 +39,13 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8091", "listen address")
 	accountID := flag.String("account-id", "mock", "account id served by the mock channel")
 	cash := flag.Float64("cash", 100_000_000, "initial mock cash")
+	mockPrices := flag.String("mock-prices", "", "mock reference prices, e.g. 000001=12.5,600000=8.2 (empty = market orders stay accepted)")
 	flag.Parse()
+
+	prices, err := parseMockPrices(*mockPrices)
+	if err != nil {
+		log.Fatalf("brokergateway: mock prices: %v", err)
+	}
 
 	// 幂等映射：默认内存实现（不接真钱，XTP 装配闸要求 Durable=true）；
 	// 给了 BROKER_DATABASE_DSN 就用持久实现，并启动保留期清理（G2）。
@@ -59,6 +68,7 @@ func main() {
 		AccountID: *accountID,
 		Cash:      *cash,
 		Store:     store,
+		Prices:    prices,
 	})
 
 	const (
@@ -116,6 +126,38 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("brokergateway: listen: %v", err)
 	}
+}
+
+// parseMockPrices 解析 `-mock-prices` 的 `SYM=PX,SYM=PX` 形式。
+//
+// 为什么需要：Mock 的市价撮合价来自 `MockOptions.Prices`，没有价格时市价单
+// 按既定语义只停在 accepted（不伪造成交）。真进程对拍（SVC-BROKER-G3 步骤 2）
+// 必须能把参考价喂进服务，否则对拍只能跑出「受理 ≠ 成交」的形态。
+func parseMockPrices(raw string) (map[string]float64, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	out := make(map[string]float64)
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		kv := strings.SplitN(item, "=", 2)
+		if len(kv) != 2 {
+			return nil, fmt.Errorf("want SYM=PX, got %q", item)
+		}
+		sym := strings.TrimSpace(kv[0])
+		if sym == "" {
+			return nil, fmt.Errorf("empty symbol in %q", item)
+		}
+		px, err := strconv.ParseFloat(strings.TrimSpace(kv[1]), 64)
+		if err != nil || px <= 0 {
+			return nil, fmt.Errorf("invalid price in %q", item)
+		}
+		out[sym] = px
+	}
+	return out, nil
 }
 
 // connectAndMigrate 建池并执行本仓唯一的 DDL（幂等、无版本表）。
