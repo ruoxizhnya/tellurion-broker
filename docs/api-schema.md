@@ -92,6 +92,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 | `POST` | `/api/broker/emergency-flatten` | 紧急清仓（body `{"reason":string}` → `EmergencyFlattenResult`） | 是 |
 
 **鉴权**：写侧要求 `Authorization: Bearer $BROKER_SERVICE_TOKEN`（常量时间比较）。**环境变量未设 = 写侧关闭**（`503 writes_disabled`），不是"不校验"；token 不匹配 = `401 unauthorized`。读侧是本机服务面，**不鉴权**（G4 已收口：就绪只看装配闸，见 §1.6；本仓不引 kit 鉴权适配器，引入读侧鉴权须另立单）。
+> **部署约束（硬）**：读侧 5 条路由**只读、无鉴权**，只允许绑定回环或服务内网，**不得暴露到公网**（持仓 / 账户 / 成交 / 对账快照对任何能连上端口的人都可见）；写侧的 `BROKER_SERVICE_TOKEN` 保护不了读侧。
 
 **幂等**：键仍是 `(account_id, client_order_id)`，与 port 形态完全一致；重放返回**原回执**且 `idempotent_replay=true`。传输层不另造幂等键。
 
