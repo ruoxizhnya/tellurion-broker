@@ -89,6 +89,6 @@ CREATE INDEX IF NOT EXISTS order_acks_updated_at_acked_idx
 
 - 订单 / 成交 / 持仓快照的最终归属未裁决（U2，集中登记于 `tellurion:docs/design/qt-decoupling/repo-inventory.md` §3.1——单仓只留此指针）；裁决前不建表。
 - `broker.order_acks` 的**保留期 = 90 天（暂定假设）**：只删 `ack IS NOT NULL` 且 `updated_at` 早于 90 天的行，先走部分索引 `order_acks_updated_at_acked_idx`，单批 ≤ 5000（第三轮裁决 ⑨，`internal/ackstore/retention.go`）。
-  - **为什么是暂定**：真正的判据是「柜台侧可查窗口」，那个事实今天未知；90 天是占位值。
+  - **口径已定（2026-11-10，主任采纳 B）**：保留期判据 = **不早于柜台可查窗口**；90 天是 P2 到手前的占位值，本轮不改 `ackstore.DefaultRetention`。
   - **复核触发条件**：柜台可查窗口一旦已知（X6c 的 P2 测试账号 / 柜台文档到手）⇒ 按 `min(柜台可查窗口, 现行值)` 重算 `ackstore.DefaultRetention`，同笔改本节与 ADR 0002。
 - 对账口径已从「逐笔成交」订正为「账户快照」（`QuerySettlement`）；真实 broker 侧与差异注入验收见 R3。

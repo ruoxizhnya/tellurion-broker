@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: G7 取证（X6c 开工条件见 x6c-xtp-readiness.md）+ 撤单 not_found 判据自审补正；R2 裁决 + 持久幂等映射落地（ADR 0002）；R5 申报数量纯函数（施工 ④）；X6d 按同日裁决暂缓
+last-verified: 2026-11-10
+verified-by: B 组债落账（2026-11-10，主任采纳 B）：order_acks 保留期口径（§9.7 R2）、R8 密钥形状、R9 暂不收紧；X6c 处置不变（仍 ⛔，待 D3）；此前 G7 取证 + 撤单 not_found 判据自审补正；R2 裁决 + 持久幂等映射落地（ADR 0002）；R5 申报数量纯函数（施工 ④）；X6d 按同日裁决暂缓
 ---
 
 # 架构 — tellurion-broker
@@ -213,14 +213,14 @@ type HealthChecker interface {
 | # | 事项 | 现状 / 冲突 | 建议裁决 |
 |---|---|---|---|
 | R1 | **订单/成交/持仓最终归属（U2）** | 现状登记 core `quant`；`run` 已排除；`exec` 镜像 schema 未裁 | 维持「现状 core `quant`」到 U2 裁决；裁决前不建表；建 `exec` 先立 ADR |
-| R2 | **幂等映射的持久化** | ✅ **已裁（2026-10-23）**：落本仓 `broker.order_acks`（ADR 0002）；`AckStore` 改为 `Load` / `Reserve`（原子占位）/ `SaveAck` / `Durable`；柜台原生 `client-order-id` 只作第二道防线。否掉 core order store（无表 / 无列 / U2 未裁，X6d 后也不成立）与本地文件 WAL（单写者、真钱前仍要换 PG） | — |
+| R2 | **幂等映射的持久化** | ✅ **已裁（2026-10-23）**：落本仓 `broker.order_acks`（ADR 0002）；`AckStore` 改为 `Load` / `Reserve`（原子占位）/ `SaveAck` / `Durable`；柜台原生 `client-order-id` 只作第二道防线。否掉 core order store（无表 / 无列 / U2 未裁，X6d 后也不成立）与本地文件 WAL（单写者、真钱前仍要换 PG）。**保留期口径 ✅ 已定（2026-11-10，主任采纳 B）**：判据 = 不早于柜台可查窗口；P2 前维持 90 天占位，P2 到手后按 `min(柜台可查窗口, 90 天)` 重算 `ackstore.DefaultRetention`，同笔改 `db-schema.md` §5 与 ADR 0002；本轮不改数值 | — |
 | R3 | **对账口径与真实 broker 侧** | 生产是 `traderAccountView` 自检（local=broker，差异恒零）；XTP 未实现 `BrokerQuerier`；`FeeSnap` 恒零 | X6b 定「快照口径」；X6c 必须提供真实 broker 侧 `QuerySettlement`；验收腿要有人为注入差异（`driftedBrokerView` 已有测试样板），不能只跑零差异 |
 | R4 | **port 归属与旧接口处置** | `BrokerGateway` 零实现；`LiveTrader`/`Broker` 两套旧面；`SimulatedBroker` 生产零调用方（AUD-34）；contracts 登记「`BrokerGateway` 未定形 / S1 不落」 | port + DTO 最终落 contracts（core 消费 + 本仓实现 = 两个使用方）；X6a 先让 Mock 同时满足旧 `LiveTrader`（core 内）与新 port（适配器薄层），再切消费方；`SimulatedBroker` 随 `LiveEngine` 一起退役或降为测试替身。「S1 不落」= 不随 QT-05 批量迁，不等于永远不落 |
 | R5 | **申报规则的所有权** | `risk.ValidateOrderQuantity`（`pkg/risk/lot.go:136`）是交易所规则，却住在 risk 包；XTP 调它，Mock 不调 | ✅ **本仓腿已落（2026-10-24）**：规则抽为通道侧纯函数 `internal/gateway/lot`（`Size` 由目标权重/价格/资金/可用数量算申报数量，`ValidateQuantity` 校验显式数量；无 I/O / 时钟 / 全局状态），Mock 已改调同一份，`gateway.DefaultLotSize` 收敛为 `lot.DefaultLotSize`。**未做（跨仓 / 等 SDK）**：core 侧 `risk.ValidateOrderQuantity` 退役与 alias、XTP 全量适配器接入——归 X6c 跨仓腿 |
 | R6 | **XTP SDK / 许可 / 装配闸** | offline skeleton；`NewXTPTrader` 只校验配置；`EmergencyFlatten` 伪造成功 | X6c 从零实现；构造期强制注入 `SettlementQuerier` + 幂等映射 + `HealthChecker`，缺一返回 error；未实现能力返回 `not_supported`；**任何路径禁止 fake success**。**装配闸已落（施工 ②/③）**；**全量实现按 G7 判定为 ⛔ 阻塞**——本仓 / core / 本机 C 工具链 / CI 四个位点都没有 SDK（取证与 P1~P5 前置见 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) §1/§4），触发条件见该文 §6 |
 | R7 | **kill-switch 的授权与审计** | `EmergencyFlatten` 绕过 T+1；XTP 侧无真实成交；谁有权触发未定 | 独立 `KillSwitch` port；调用方必须带运维身份与 reason；逐标的落审计（`bypassed_t1`）；与 QT-50 ④ 的鉴权矩阵合流 |
-| R8 | **密钥脱敏** | `Config.Password` `json:"-"` 但 `yaml:"password"`（`pkg/live/broker/xtp/xtp.go:119`） | 配置结构加 `String()`/日志脱敏；禁止把 `Config` 整体打进日志；密钥只从环境/密钥管理注入；加一条「日志里不出现 password」的测试 |
-| R9 | **Mock 与真实柜台的行为差异（F9，G7 取证登记）** | 三条实测：① 买入当日即 `AvailableQuantity = Quantity`，**T+1 不进 Mock**（`internal/gateway/mock.go:295`）；② 卖出超过可用数量**放行**、持仓减到 ≤0 直接删行（`mock.go:300-305`；`PlaceOrder` 只用 `lot.ValidateQuantity` 校申报单位，`mock.go:663`）；③ `Fill` 三项费用与 `AccountSnapshot.Fees` **恒零** | 待裁：是否收紧 ②——那是**契约行为变更**（要动 `api-schema.md` §2 的错误语义，可能一条 ADR），G7 不单方面改。收紧前必须如实读：Mock 全绿 ≠ 柜台绿；C 组（真实柜台最小闭环）的验收清单以这三条为来源（[`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) §8） |
+| R8 | **密钥脱敏** | `Config.Password` `json:"-"` 但 `yaml:"password"`（`pkg/live/broker/xtp/xtp.go:119`） | 配置结构加 `String()`/日志脱敏；禁止把 `Config` 整体打进日志；密钥只从环境/密钥管理注入；加一条「日志里不出现 password」的测试。✅ **形状已定（2026-11-10，主任采纳 B）**：密钥/证书只从环境或密钥管理注入；`XTPConfig` 保持零密钥字段；禁止 `%+v` / JSON 整体序列化与日志；适配器内部只持引用，日志只打长度/指纹；脱敏测试随 X6c 落（当前无密钥字段，无代码可改） |
+| R9 | **Mock 与真实柜台的行为差异（F9，G7 取证登记）** | 三条实测：① 买入当日即 `AvailableQuantity = Quantity`，**T+1 不进 Mock**（`internal/gateway/mock.go:295`）；② 卖出超过可用数量**放行**、持仓减到 ≤0 直接删行（`mock.go:300-305`；`PlaceOrder` 只用 `lot.ValidateQuantity` 校申报单位，`mock.go:663`）；③ `Fill` 三项费用与 `AccountSnapshot.Fees` **恒零** | 待裁：是否收紧 ②——那是**契约行为变更**（要动 `api-schema.md` §2 的错误语义，可能一条 ADR），G7 不单方面改。收紧前必须如实读：Mock 全绿 ≠ 柜台绿；C 组（真实柜台最小闭环）的验收清单以这三条为来源（[`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) §8）。✅ **已裁（2026-11-10，主任采纳 B）：暂不收紧**——① T+1 属撮合/结算规则，Mock 定位纸交易；② 超卖收紧会改 `api-schema.md` §2 的契约语义，且当前无真实柜台可对拍；③ 费用恒零属费用模型缺失，超出通道职责。三条差异保留为 C 组验收清单；收紧须另立 ADR + `api-schema.md` 变更 |
 | R10 | **映射读失败报成 `channel_down`** | `QueryOrder`（`mock.go:415`）与 `CancelOrder`（`mock.go:358`）原都把映射读失败翻译成 `channel_down`；按 `api-schema.md` §2 的判据，准确哨兵是 `idempotency_store_unavailable` | ✅ **已落（2026-11-07，第三轮裁决 ㉒「现在修」）**：两处同批改为 `ErrIdempotencyStoreUnavailable` 并保留底层 `err` 上下文，各一条用例（`TestCancelOrderReportsStoreUnavailableWhenMappingReadFails` / `TestQueryOrderReportsStoreUnavailableWhenMappingReadFails`）；`found == true` 的 `unknown_state` 分支与真断连路径的 `channel_down` 未动。破坏验证：把其中一处改回 `ErrChannelDown` ⇒ 对应用例红、还原复绿 |
 
 ### 9.8 实现现状（2026-10-25，施工 ① + ② + ③ + ④ ＋ G7 自审补正）
