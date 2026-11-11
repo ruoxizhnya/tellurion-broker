@@ -13,6 +13,8 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 ## 一、未做 / 挂起 / 外部依赖
 
 > 本节 = 本轮（2026-11-11）台账重整后剩下的挂起项（`X6c` 及其派生项）+ 全面审查 W7 新立 3 单（`BROKER-DEP-BUMP` / `BROKER-AUTH-ADR` / `BROKER-RETRY-AFTER`）。此前已收口单的正文与施工记录全部在归档文件里。
+>
+> **2026-11-12 进展**：`BROKER-DEP-BUMP` ✅ 已收口（pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0；PG 集成腿因本机无 `BROKER_TEST_DSN`/口令如实记为未跑并登记重开条件），原文与落账见 [`archive/tasks-archive-2026-11.md`](archive/tasks-archive-2026-11.md#BROKER-DEP-BUMP)。本节仅剩 `BROKER-AUTH-ADR` / `BROKER-RETRY-AFTER`。
 
 ### X6c · 真钱通道（XTP 全量适配器）[P1] ⏸（外部依赖）
 
@@ -33,16 +35,6 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑤ 验收**：换装配实现后 `/version.channel` 随之变化；破坏验证 = 改回常量 ⇒ 用例红。
 - **⑥ 边界**：本仓 server 装配；core 侧消费归 `tellurion`（`CORE-BROKER-RUNTIME-RECHECK`）。
 - **重开条件**：`X6c` 重开时**必须同批完成**（属 X6c 的准入项，不可单独跳过）。
-
-### BROKER-DEP-BUMP · pgx / x-text 落在已知漏洞版本（govulncheck EXIT=1）[P0] ⬜
-
-- **① 目标**：把本仓 `go.mod` 的 pgx 与 x/text 升到无已知漏洞的版本，`govulncheck ./...` 退出码归 0，消除供应链卫生债。
-- **② 上下文（2026-11-11 全面审查 W5-F1，证据 ODR-072 `tellurion-docs:docs/archive/odr/odr-072-audit-wave5-security-reliability-deps.md`；裁决 D1=b：pgx 一步收敛到 v5.11.0）**：`go.mod:6` `github.com/jackc/pgx/v5 v5.7.3`、`:16` `golang.org/x/text v0.21.0 // indirect`（go.sum 复核同版）。W5 govulncheck E1 实测 10/12 仓 EXIT=1，本仓在列。pgx 的 SQLi 告警**实际暴露面低**——`internal/ackstore/pg.go:66-73` `Reserve` 用 `$1/$2/$3` 参数化、`tableName` 是常量拼接非用户输入（ODR-072 Lessons Learned ①「难利用不是不修的理由」）；修法是依赖 bump，不是改查询。跨仓 pgx 三档并存（core/kit/data/strategy/agent/orch/broker=v5.7.3，risk=v5.7.5，analytics=v5.11.0），本单只收敛**本仓**到 v5.11.0，不做全组 tidy。
-- **③ 要求**：① `go get github.com/jackc/pgx/v5@v5.11.0` + `go mod tidy`，x/text 随 tidy 升到无漏洞版（或显式 `go get golang.org/x/text@latest` 取补丁版）；② `govulncheck ./...` EXIT=0；③ `internal/ackstore` 的 PG 集成腿（`BROKER_TEST_DSN`，`tellurion_broker_test` 库）真跑全 PASS，确认 v5.7.3→v5.11.0 无行为回归（`pgxpool`/`pgx.ErrNoRows`/`ON CONFLICT` 语义不变）；④ AGENTS.md §4 依赖表同步新版本。
-- **④ 约束与非目标**：不改 `Reserve`/`Load`/`SaveAck` 的 SQL 与幂等语义；不引入 kit（本仓今天不 require kit）；不动 contracts pin（已 v0.10.0）；不在本单顺手统一别仓 pgx；不提交 `go.work`。
-- **⑤ 验收**：`govulncheck ./...` EXIT=0（真退出码，非管道 tail）；`go build/vet/test ./... -count=1` 全绿；`BROKER_TEST_DSN=... go test ./internal/ackstore -count=1` 全 PASS（数 PASS 行，非「no tests to run」）；破坏验证 = 把 pgx 降回 v5.7.3 ⇒ govulncheck 复红，还原复绿。
-- **⑥ 边界**：本仓 `go.mod`/`go.sum` + AGENTS.md §4；kit pin 的 7 消费仓 bump 归 `tellurion:docs/TASKS.md` → `X-DEP-BUMP-CONSUMERS`（本仓不 require kit，不在该批内）。
-- **owner**：待定
 
 ### BROKER-AUTH-ADR · 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 [P2] ⬜
 

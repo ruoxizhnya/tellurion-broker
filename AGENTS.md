@@ -49,11 +49,13 @@ go test ./...
 
 | 依赖 | 版本 | 说明 |
 |---|---|---|
-| `github.com/ruoxizhnya/tellurion-contracts` | `v0.9.0`（2026-11-09 引入） | `broker` 包 = 订单 / 成交 / 持仓 / 账户 / 紧急清仓 wire 形状的唯一 owner；本仓 `internal/gateway/model.go` 只留类型别名（CT-05 收编） |
+| `github.com/ruoxizhnya/tellurion-contracts` | `v0.10.0`（2026-11-10 升，`c00d9b1`） | `broker` 包 = 订单 / 成交 / 持仓 / 账户 / 紧急清仓 wire 形状的唯一 owner；本仓 `internal/gateway/model.go` 只留类型别名（CT-05 收编） |
 | `github.com/ruoxizhnya/tellurion-kit` | 未引入（远端最新 `v0.2.0`，2026-11-10 发版；`v0.1.4` 为 2026-10-25 的前一版） | 日志 / HTTP |
-| `github.com/jackc/pgx/v5` | `v5.7.3` | `internal/ackstore` 的 PG 连接池与查询（幂等映射 `broker.order_acks`，ADR 0002）；版本与 core / kit / strategy 对齐 |
+| `github.com/jackc/pgx/v5` | `v5.11.0`（2026-11-12 升，`BROKER-DEP-BUMP`） | `internal/ackstore` 的 PG 连接池与查询（幂等映射 `broker.order_acks`，ADR 0002）；旧 `v5.7.3` 命中 GO-2026-5004（修复于 `v5.9.2`） |
+| `golang.org/x/text`（indirect） | `v0.44.0`（2026-11-12 随 `go mod tidy` 升） | pgx 的传递依赖；旧 `v0.21.0` 命中 GO-2026-5970 / GO-2026-6629（`x/text/secure/precis` panic，修复于 `v0.41.0`） |
+| Go 工具链（`go` directive） | `1.26.11`（2026-11-12 升） | 旧 `1.25` 使 stdlib 命中 9 条告警（`net/http` / `net/textproto` / `crypto/tls` / `crypto/x509`，最高要求修复版 `1.26.11`）；`govulncheck ./...` EXIT=0 的前提 |
 
-> `go.mod` 的直接依赖 = `pgx v5.7.3` + `tellurion-contracts v0.9.0`（2026-11-09 CT-05 收编后）；`internal/gateway` / `internal/reconcile` 的其余依赖仍是 stdlib。DTO 字段定义住在 `tellurion-contracts/broker`，本仓只做类型别名与自由函数 `Fingerprint`。
+> `go.mod` 的直接依赖 = `pgx v5.11.0` + `tellurion-contracts v0.10.0`（2026-11-09 CT-05 收编后）；`internal/gateway` / `internal/reconcile` 的其余依赖仍是 stdlib。DTO 字段定义住在 `tellurion-contracts/broker`，本仓只做类型别名与自由函数 `Fingerprint`。
 
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。
 

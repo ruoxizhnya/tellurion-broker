@@ -15,6 +15,7 @@
 | SVC-BROKER-G2 | 服务就绪门 G2：`broker.order_acks` 唯一 writer · 保留期与部分索引（裁决 ⑨） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G2) |
 | R10 | 幂等映射读失败的哨兵从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`（㉒ 已裁「现在修」） | 2026-11-07 | —（原文未记） | [原文](#R10) |
 | SVC-BROKER-G4 | 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G4)；[`ADR 0003`](adr/0003-真钱通道暂不实施与重开条件.md)；[`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) |
+| BROKER-DEP-BUMP | pgx / x-text 落在已知漏洞版本（govulncheck EXIT=1） | 2026-11-12 | 见 `git log --grep BROKER-DEP-BUMP` | [原文](#BROKER-DEP-BUMP) |
 
 ---
 
@@ -325,3 +326,25 @@
 | R4（QT-45 子项） | core 旧 `LiveTrader` / `Broker` 退役（切读后停写） | `tellurion:docs/TASKS.md`；**本仓只登记跨仓腿，不改 core**（派工约束） |
 
 ---
+
+## 2026-11-12 收口（全面审查 W7 三单）
+
+<a id="BROKER-DEP-BUMP"></a>
+### BROKER-DEP-BUMP · pgx / x-text 落在已知漏洞版本（govulncheck EXIT=1）[P0] ✅（2026-11-12）
+
+- **① 目标**：把本仓 `go.mod` 的 pgx 与 x/text 升到无已知漏洞的版本，`govulncheck ./...` 退出码归 0，消除供应链卫生债。
+- **② 上下文（2026-11-11 全面审查 W5-F1，证据 ODR-072 `tellurion-docs:docs/archive/odr/odr-072-audit-wave5-security-reliability-deps.md`；裁决 D1=b：pgx 一步收敛到 v5.11.0）**：`go.mod:6` `github.com/jackc/pgx/v5 v5.7.3`、`:16` `golang.org/x/text v0.21.0 // indirect`。pgx 的 SQLi 告警**实际暴露面低**——`internal/ackstore/pg.go:66-73` `Reserve` 用 `$1/$2/$3` 参数化、`tableName` 是常量拼接非用户输入（ODR-072 Lessons Learned ①「难利用不是不修的理由」）；修法是依赖 bump，不是改查询。本单只收敛**本仓**，不做全组 tidy。
+- **③ 要求**：① pgx → v5.11.0 + `go mod tidy`；② `govulncheck ./...` EXIT=0；③ `internal/ackstore` PG 集成腿真跑全 PASS；④ AGENTS.md §4 同步。
+- **④ 约束与非目标**：不改 `Reserve`/`Load`/`SaveAck` 的 SQL 与幂等语义；不引入 kit；不动 contracts pin（已 v0.10.0）；不顺手统一别仓 pgx；不提交 `go.work`。
+- **⑤ 验收**：`govulncheck ./...` EXIT=0；`go build/vet/test ./... -count=1` 全绿；PG 集成腿全 PASS；破坏验证 = 降回 v5.7.3 ⇒ 复红。
+- **⑥ 边界**：本仓 `go.mod`/`go.sum` + AGENTS.md §4。
+- **落账（2026-11-12，commit 见 `git log --grep BROKER-DEP-BUMP`）**：
+  - **变更**：`pgx v5.7.3 → v5.11.0`；`x/text v0.21.0 → v0.44.0`；`x/sync v0.10.0 → v0.25.0`（indirect）；`x/crypto` 随 pgx 升级后不再被需要（`go mod tidy` 移除）。
+  - **范围外但必要的一步**：`go` directive `1.25 → 1.26.11`。原单只点名 pgx / x/text，但升级前基线实测 **12 条**告警中有 **9 条是 stdlib**（`net/http` ×5、`net/textproto`、`crypto/tls`、`crypto/x509`，最高要求修复版 `1.26.11`），不升工具链则 `govulncheck` 不可能 EXIT=0。仅改本仓 `go.mod`，未动别仓。
+  - **基线（升级前）**：`govulncheck ./...` **EXIT=3**，12 条（stdlib 9 + `x/text` 2（GO-2026-5970 / GO-2026-6629）+ `pgx` 1（GO-2026-5004））。
+  - **升级后**：`govulncheck ./...` **EXIT=0**，`No vulnerabilities found.`
+  - **构建门禁**：`go build ./...` EXIT=0；`go vet ./...` EXIT=0；`go test ./... -count=1` EXIT=0（6 个包 ok，含 `cmd/brokergateway`、`internal/ackstore`）。
+  - **破坏验证**：`go get github.com/jackc/pgx/v5@v5.7.3` ⇒ `govulncheck` **EXIT=3**，报 `GO-2026-5004 / github.com/jackc/pgx/v5@v5.7.3`；从备份**逐字节还原** go.mod / go.sum（SHA256 与备份一致）⇒ **EXIT=0**。
+  - **真实缺口（如实登记，未冒充跑过）**：`internal/ackstore` 的 **PG 集成腿未运行**。本机 `PostgreSQL 16.15`（`127.0.0.1:5432`）的 `pg_hba.conf` 全量 `scram-sha-256`，环境无 `BROKER_TEST_DSN` / 口令，按约束不得改认证方式、不猜口令。实测 `go test ./internal/ackstore -v -count=1`：4 条纯函数用例 PASS，9 条 PG 用例 `SKIP`（`BROKER_TEST_DSN is not set`）。**重开条件**：拿到 `BROKER_TEST_DSN`（含口令、`tellurion_broker_test` 库）后重跑 `go test ./internal/ackstore -count=1 -v`，确认 9 条 PG 用例 PASS 且 `pgxpool` / `pgx.ErrNoRows` / `ON CONFLICT` 语义无回归。
+  - **口径订正**：派单文字里的 `TEST_DATABASE_DSN` 在本仓**不存在**；真实门控变量是 `BROKER_TEST_DSN`（`internal/ackstore/pg_test.go:20`）。
+
