@@ -14,7 +14,7 @@ verified-by: 2026-11-12 全面审查 W7 三单收口（`BROKER-DEP-BUMP`：pgx v
 
 > 本节 = 本轮（2026-11-11）台账重整后剩下的挂起项（`X6c` 及其派生项）+ 全面审查 W7 新立 3 单（`BROKER-DEP-BUMP` / `BROKER-AUTH-ADR` / `BROKER-RETRY-AFTER`）。此前已收口单的正文与施工记录全部在归档文件里。
 >
-> **2026-11-12 进展**：全面审查 W7 三单**全部收口** ✅ —— `BROKER-DEP-BUMP`（pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0；PG 集成腿因本机无 `BROKER_TEST_DSN`/口令如实记为未跑并登记重开条件）、`BROKER-AUTH-ADR`（新增 ADR-0004 + runbook §2.1 轮换 + api-schema 指回，未改代码行为）、`BROKER-RETRY-AFTER`（429 `rate_limited` 补 `Retry-After` + 两条用例 + 破坏验证）。原文与落账见 [`archive/tasks-archive-2026-11.md`](archive/tasks-archive-2026-11.md#BROKER-DEP-BUMP)。本节回到「只剩 `X6c` 派生项」。
+> **2026-11-12 进展**：全面审查 W7 三单**全部收口** ✅ —— `BROKER-DEP-BUMP`（pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0；ackstore PG 集成腿当日补跑 **12/12 PASS、0 SKIP**，临时库验毕即删；工具链升级已由主任确认保留并登记在 `AGENTS.md` §2 与 `runbook.md` §11）、`BROKER-AUTH-ADR`（新增 ADR-0004 + runbook §2.1 轮换 + api-schema 指回，未改代码行为）、`BROKER-RETRY-AFTER`（429 `rate_limited` 补 `Retry-After` + 两条用例 + 破坏验证）。原文与落账见 [`archive/tasks-archive-2026-11.md`](archive/tasks-archive-2026-11.md#BROKER-DEP-BUMP)。本节回到「只剩 `X6c` 派生项」。
 
 ### X6c · 真钱通道（XTP 全量适配器）[P1] ⏸（外部依赖）
 
