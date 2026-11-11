@@ -11,12 +11,12 @@
 | SVC-BROKER-G0 | 服务就绪门 G0：Mock 服务入口与自有部署（ADR-036） | 2026-10-26 | —（原文未记） | [原文](#SVC-BROKER-G0) |
 | SVC-BROKER-G1 | 订单 HTTP 契约（ADR-036 G1） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G1) |
 | SVC-BROKER-G3 | core 切读与旧 LiveTrader 退役（ADR-036 G3） | 2026-11-10 | `73df23b` | [原文](#SVC-BROKER-G3) |
-| QT-45 | X6 交易通道网关（XTPTrader / MockTrader 两实现） | 2026-11-10 | `dbe4c68` | [原文](#QT-45)；[ADR 0003](adr/0003-真钱通道暂不实施与重开条件.md)；[`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) |
+| QT-45 | X6 交易通道网关（XTPTrader / MockTrader 两实现） | 2026-11-10 | `dbe4c68` | [原文](#QT-45)；[ADR 0003](../adr/0003-真钱通道暂不实施与重开条件.md)；[`x6c-xtp-readiness.md`](../x6c-xtp-readiness.md) |
 | SVC-BROKER-G2 | 服务就绪门 G2：`broker.order_acks` 唯一 writer · 保留期与部分索引（裁决 ⑨） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G2) |
 | R10 | 幂等映射读失败的哨兵从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`（㉒ 已裁「现在修」） | 2026-11-07 | —（原文未记） | [原文](#R10) |
-| SVC-BROKER-G4 | 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G4)；[`ADR 0003`](adr/0003-真钱通道暂不实施与重开条件.md)；[`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) |
+| SVC-BROKER-G4 | 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G4)；[`ADR 0003`](../adr/0003-真钱通道暂不实施与重开条件.md)；[`x6c-xtp-readiness.md`](../x6c-xtp-readiness.md) |
 | BROKER-DEP-BUMP | pgx / x-text 落在已知漏洞版本（govulncheck EXIT=1） | 2026-11-12 | 见 `git log --grep BROKER-DEP-BUMP` | [原文](#BROKER-DEP-BUMP) |
-| BROKER-AUTH-ADR | 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 | 2026-11-12 | 见 `git log --grep BROKER-AUTH-ADR` | [原文](#BROKER-AUTH-ADR)；[ADR 0004](adr/0004-鉴权姿态与静态token分叉.md) |
+| BROKER-AUTH-ADR | 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 | 2026-11-12 | 见 `git log --grep BROKER-AUTH-ADR` | [原文](#BROKER-AUTH-ADR)；[ADR 0004](../adr/0004-鉴权姿态与静态token分叉.md) |
 | BROKER-RETRY-AFTER | 429 `rate_limited` 不带 Retry-After | 2026-11-12 | 见 `git log --grep BROKER-RETRY-AFTER` | [原文](#BROKER-RETRY-AFTER) |
 
 ---
@@ -126,10 +126,10 @@
 > **如实登记**：`X6c`（真实 XTP）仍 ⛔ 不变（无 SDK / C 工具链 / 柜台网络，见 `x6c-xtp-readiness.md`）；本单是 Mock 路径的切读，不接真钱。
 
 <a id="QT-45"></a>
-### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] ✅（2026-11-10 按主任授权收口：终态 = Mock 全绿 + fail-closed 骨架，见 [ADR 0003](adr/0003-真钱通道暂不实施与重开条件.md)）
+### QT-45 · X6 交易通道网关（XTPTrader / MockTrader 两实现）[P2] ✅（2026-11-10 按主任授权收口：终态 = Mock 全绿 + fail-closed 骨架，见 [ADR 0003](../adr/0003-真钱通道暂不实施与重开条件.md)）
 
 > **2026-11-10 终态落账（主任把「要不要真钱通道」决策权下放，执行侧裁定）**：
-> - **决策**：现阶段**不投入真钱通道实施**。终态 = **Mock 全链路全绿 + `XTPTrader` fail-closed 骨架（零 fake success）+ 装配闸（缺依赖 / 无持久幂等键构造期拒绝）**。成文 [`ADR 0003`](adr/0003-真钱通道暂不实施与重开条件.md)。
+> - **决策**：现阶段**不投入真钱通道实施**。终态 = **Mock 全链路全绿 + `XTPTrader` fail-closed 骨架（零 fake success）+ 装配闸（缺依赖 / 无持久幂等键构造期拒绝）**。成文 [`ADR 0003`](../adr/0003-真钱通道暂不实施与重开条件.md)。
 > - **不是永久不做**：重开条件 = `x6c-xtp-readiness.md` §4 的 **P1~P5 同时满足**（XTP SDK、C 工具链、柜台网络、测试账号、盯盘时间窗）；满足后**另立 X6c 施工单 + 一条真钱形态 ADR**，本 ADR 转 `Superseded`。
 > - **⑤ 验收改写**：① Mock 全链路（`internal/gateway/mock_test.go` 全族 + 6 条 PG 腿按 DSN 门控）；② 两实现共用同一 `BrokerGateway` 调用面（实现层；XTP 为骨架）；③ 通道拒绝 / 风控拒绝 / 通道断开错误码可区分（12 哨兵逐码断言）；④ DTO 契约测试（`wire_shape_test.go`，contracts v0.9.0）；⑤ XTP 装配闸 + 全方法 `channel_down`（`TestNewXTPTrader_GateRejectsIncompleteAssembly` / `TestXTPTrader_AllCallsFailClosedWithChannelDown`）。「XTP 全量适配器」**转挂起项 X6c**，不再是本单验收项。
 > - **保留**：B 组已落债务结论（`order_acks` 保留期口径 / R8 密钥形状 / R9 暂不收紧）与 C 组接入验收清单，作为重开时的准入清单，不改写。
@@ -146,7 +146,7 @@
 > ⑤ **文档同步**：`ARCHITECTURE.md`（frontmatter + §9.7 R2/R8/R9）、`db-schema.md` §5、`x6c-xtp-readiness.md` §3 + 新增 §11、`AGENTS.md` §1、本文。
 >
 > **施工记录（2026-10-25，施工 ⑤ = 派工 G7）**：**本组不具备开工条件，交付的是决策材料**——
-> 新建 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md)（四处取证 / 九项不可猜的柜台事实 / 剩余范围哪一半与 SDK 无关 /
+> 新建 [`x6c-xtp-readiness.md`](../x6c-xtp-readiness.md)（四处取证 / 九项不可猜的柜台事实 / 剩余范围哪一半与 SDK 无关 /
 > P1~P5 开工前置 / 三个选项与推荐 / 可判定的触发条件）。核对结论：**X6c 判 ⛔ 阻塞，不是 🔶 待做**。
 > ① **前提核实（四处实测，都不在仓内）**：本仓 `find` 只有 `internal/gateway/xtp.go` + 其测试，无头文件 / 无 `.so`/`.dll`；
 > core 侧 `git grep -l 'import "C"'` 零命中、注释里承诺的 `internal/cgo/xtp/` 目录不存在；本机 `go env CGO_ENABLED` = `0`
@@ -185,7 +185,7 @@
 > **仍未做（如实登记）**：XTP 全量适配器接入这份规则（归 X6c）、core `risk.ValidateOrderQuantity` 退役与 alias（跨仓腿，本仓不改 core）——「两个实现共用」在本仓只落了 Mock 这一半。
 >
 > **施工记录（2026-10-23，施工 ③）**：**R2 裁决落账 + 持久幂等映射落地**，`go build/vet/test` 全绿（gateway / ackstore / reconcile；PG 集成腿 6/6，DSN 在案）——
-> ① **R2 裁决**（[ADR 0002](adr/0002-幂等映射落-broker-写前日志.md)）：幂等映射落本仓 `broker.order_acks`（写前日志，**不是订单真相**）；柜台原生 `client-order-id` 只作第二道防线（重放不出当初 ack、比不了指纹，且仓内无 SDK 无法验证）；否掉 core order store（无表 / 无列 / U2 未裁，X6d 后也不成立）与本地文件 WAL。
+> ① **R2 裁决**（[ADR 0002](../adr/0002-幂等映射落-broker-写前日志.md)）：幂等映射落本仓 `broker.order_acks`（写前日志，**不是订单真相**）；柜台原生 `client-order-id` 只作第二道防线（重放不出当初 ack、比不了指纹，且仓内无 SDK 无法验证）；否掉 core order store（无表 / 无列 / U2 未裁，X6d 后也不成立）与本地文件 WAL。
 > ② **端口形状修正**：旧 `AckStore` 的 `Load` + `Save` 两步没有原子性——实测并发同 ID 两边都读到未命中会各发一笔（**16/16 复现**）。改为 `Load` / `Reserve`（原子占位）/ `SaveAck` / `Durable`；PG 用 `INSERT ... ON CONFLICT DO NOTHING RETURNING` 判定发送权，内存实现用同一临界区。
 > ③ **持久实现**：`internal/ackstore`（`ddl.go` + `pg.go`），`broker.order_acks`：主键 `(account_id, client_order_id)`、载荷指纹、`ack` 可为 NULL（占位未回执）、时间戳；`ackstore.Migrate` 启动时执行（幂等、无版本表）。新增 `pgx v5.7.3` 依赖（AGENTS §4 已登记）。
 > ④ **装配闸收紧**：`NewXTPTrader` 现在要求 `Acks.Durable()==true`——`MemoryAckStore` 接真钱在构造期被拒，「无幂等键不接真钱」不再靠装配方记得。
@@ -205,7 +205,7 @@
 > ③ **判重域与本地索引同口径**：原先幂等映射按**请求的** `AccountID` 存、本地订单状态按**通道的**账户索引 → 单账户开发态下两者不一致，查单 / 撤单查不到自己下的那一单。统一为通道账户（配置了账户时二者本就相等）。
 > 另加：四个 port 的**编译期接口断言**（方法集是冻结面，少一个方法就是实现方全红）。
 >
-> **M8 前置完成（2026-10-22）**：接口对表见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9。开工前先读 §9.1 的八条前置事实——今天不是「一个 port 两实现」而是**两个 port、三个实现**（F1）、没有上游幂等键（F2）、没有可区分的错误分类（F3）、XTP 是 offline skeleton 且 `EmergencyFlatten` 伪造成功（F4）、申报规则归属混用且 Mock 不校验（F5）、对账真实输入是 `QuerySettlement` 快照而非 `QueryFills` 且生产自检恒零差异（F6）、DTO 全在 core 且混入执行层语义（F7）、XTP 装配前置无检查（F8）。本单当时**仍 ⬜**（对表是开工前置，不是实现）；X6a 从「先定 `ClientOrderID` 幂等」开始，X6b 口径订正为快照，X6c 是从零实现而非接 SDK。
+> **M8 前置完成（2026-10-22）**：接口对表见 [`ARCHITECTURE.md`](../ARCHITECTURE.md) §9。开工前先读 §9.1 的八条前置事实——今天不是「一个 port 两实现」而是**两个 port、三个实现**（F1）、没有上游幂等键（F2）、没有可区分的错误分类（F3）、XTP 是 offline skeleton 且 `EmergencyFlatten` 伪造成功（F4）、申报规则归属混用且 Mock 不校验（F5）、对账真实输入是 `QuerySettlement` 快照而非 `QueryFills` 且生产自检恒零差异（F6）、DTO 全在 core 且混入执行层语义（F7）、XTP 装配前置无检查（F8）。本单当时**仍 ⬜**（对表是开工前置，不是实现）；X6a 从「先定 `ClientOrderID` 幂等」开始，X6b 口径订正为快照，X6c 是从零实现而非接 SDK。
 > 对表自检（2026-10-22，基线 core `dbe4c68`）：core `path:line` 引用逐条命中；4 个目标 port / 9 个方法 / 12 个错误码与 `api-schema.md` 双向一致；破坏验证三腿（改错行号 / 删一个方法 / 删一个错误码）各自红，还原后绿。
 
 - **① 目标**：交易通道收敛为 port 两实现，归一化 DTO 进 contracts；通道级校验与风控校验分界清晰。
@@ -315,7 +315,7 @@
 |---|---|---|---|
 | X6a | `BrokerGateway` port + `MockTrader`（`ClientOrderID` 幂等 / 超时语义跑通）✅（`internal/gateway` 全量 + core 侧已接（`SVC-CORE-BROKER-RETIRE` 步骤 B），2026-11-10） | `QT-45` | 本仓立项 + M8 对表 ✅ |
 | X6b | 对账口径定稿（**账户快照** `QuerySettlement` + 真实 broker 侧 + 差异注入验收）✅（口径纯函数 + 差异注入验收在 `internal/reconcile`；真实 broker 侧随 X6c 挂起） | `QT-45` | X6a |
-| X6c | `XTPTrader` 全量适配器（从零实现；装配前置：对账 + 幂等 + 熔断，缺一构造期拒绝）**⏸ 挂起（外部依赖，2026-11-10 裁决）**——装配闸 + fail-closed 骨架 + 持久幂等映射已落；全量实现缺 P1~P5 五项外部条件（SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗）。**不计入开放项**；重开 = P1~P5 同时满足 + 另立施工单 + 真钱形态 ADR（见 [`ADR 0003`](adr/0003-真钱通道暂不实施与重开条件.md)）；取证与范围切分见 [`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) | `QT-45` | X6b ＋ **P1~P5 同时满足** |
+| X6c | `XTPTrader` 全量适配器（从零实现；装配前置：对账 + 幂等 + 熔断，缺一构造期拒绝）**⏸ 挂起（外部依赖，2026-11-10 裁决）**——装配闸 + fail-closed 骨架 + 持久幂等映射已落；全量实现缺 P1~P5 五项外部条件（SDK / 测试账号 / 出网 / C 工具链 / 盯盘时间窗）。**不计入开放项**；重开 = P1~P5 同时满足 + 另立施工单 + 真钱形态 ADR（见 [`ADR 0003`](../adr/0003-真钱通道暂不实施与重开条件.md)）；取证与范围切分见 [`x6c-xtp-readiness.md`](../x6c-xtp-readiness.md) | `QT-45` | X6b ＋ **P1~P5 同时满足** |
 | X6d | 独立进程（回环监听 + 健康检查）——**ADR-036（2026-10-26）取代 2026-10-23「暂缓」**：本仓按服务定位，G0 先落 Mock 服务入口 ✅（`cmd/brokergateway`）；真实 XTP 侧随 X6c 挂起 | `SVC-BROKER-G0` / `QT-45` | 多账户共用通道 / 通道级高可用 |
 
 
@@ -360,7 +360,7 @@
 - **④ 约束与非目标**：**本轮不改鉴权代码**（不迁 kit JWT、不动 `requireToken`、不给读端点加闸）——纯决策固化 + 文档；不放宽 fail-closed；不把静态 token 表述成「生产级鉴权」；真钱形态的鉴权重裁归 X6c。
 - **⑤ 验收**：ADR-0004 存在且 Status=Accepted、含 Context/Decision/Consequences 与「dev-only / X6c 重开重裁」边界；runbook 有轮换步骤；api-schema 有指回链接；链接巡检活跃层 0 断链。
 - **⑥ 边界**：本仓 `docs/adr/` + `docs/runbook.md` + `docs/api-schema.md` 鉴权节。
-- **落账（2026-11-12，commit 见 `git log --grep BROKER-AUTH-ADR`）**：新增 ADR-0004（状态=已裁决，含决策 5 条、轮换方式、代价、否决替代、三条重开条件）；`runbook.md` 新增 §2.1 轮换步骤（8 步，写明**单 token 槽位、无热加载 ⇒ 无平滑窗口**，窗口内写请求 401）；`api-schema.md` §1.5 鉴权节加「裁决依据」行指回 ADR-0004 与 runbook §2.1；`adr/README.md` 索引登记。**未改任何代码行为**（`requireToken` 未动）。链接巡检（活跃层 + 含归档层）：活跃层 0 断链；归档层遗留坏链见下方「已知遗留」。
+- **落账（2026-11-12，commit 见 `git log --grep BROKER-AUTH-ADR`）**：新增 ADR-0004（状态=已裁决，含决策 5 条、轮换方式、代价、否决替代、三条重开条件）；`runbook.md` 新增 §2.1 轮换步骤（8 步，写明**单 token 槽位、无热加载 ⇒ 无平滑窗口**，窗口内写请求 401）；`api-schema.md` §1.5 鉴权节加「裁决依据」行指回 ADR-0004 与 runbook §2.1；`adr/README.md` 索引登记。**未改任何代码行为**（`requireToken` 未动）。链接巡检（活跃层 + 含归档层）：活跃层 0 断链；归档层遗留坏链见下方「已知遗留处理记录」。
 
 <a id="BROKER-RETRY-AFTER"></a>
 ### BROKER-RETRY-AFTER · 429 `rate_limited` 不带 Retry-After [P3] ✅（2026-11-12）
@@ -379,12 +379,12 @@
   - **门禁**：`gofmt -l .` 空；`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全 EXIT=0（6 包 ok）。
   - 文档：`docs/api-schema.md` §2 `rate_limited` 行登记 `Retry-After` 必带、值口径与位置。
 
-### 已知遗留（2026-11-12 巡检发现，**非本轮引入，未修**）
+### 已知遗留处理记录：归档层断链（2026-11-12 已修，仅改路径层级）
 
-`docs/archive/tasks-archive-2026-11.md` 里由 2026-11-11 迁移保留下来的相对链接共 11 条断链：`adr/0002-…`、`adr/0003-…`、`x6c-xtp-readiness.md`、`ARCHITECTURE.md`。原因 = 归档文件位于 `docs/archive/`，比原 `docs/TASKS.md` 深一层，迁移时按「逐字搬入、未改写」保留原相对路径，因此 `../` 少了一级。
+`docs/archive/tasks-archive-2026-11.md` 里由 2026-11-11 迁移保留下来的相对链接共 12 条断链：`adr/0002-…`、`adr/0003-…`、`adr/0004-…`、`x6c-xtp-readiness.md`、`ARCHITECTURE.md`。原因 = 归档文件位于 `docs/archive/`，比原 `docs/TASKS.md` 深一层，迁移时按「逐字搬入、未改写」保留原相对路径，因此 `../` 少了一级。
 
-- **为什么本轮不修**：本文件的章程是「逐字搬入、未改写」，改链接等于改写归档正文；且这是文档结构问题，不属于三张施工单的范围。
-- **处置建议（待决策）**：另立一条文档单，二选一：① 对这 11 条链接做 `../` 前缀订正并在此登记「归档层路径订正，非内容改写」；② 在 `docs/archive/README.md` 声明归档层不做链接巡检豁免并挂起。**未立单前不修**。
+- **处置（2026-11-12，主任批准）**：只对链接目标的相对路径补 `../`，**归档正文一个字未动**，不改任何历史判断与结论。修完归档层链接巡检 0 断链；把任一链接改回原层级应重新变红（已验证）。
+- **注意**：本节之后若再往归档搬正文，链接必须按 `docs/archive/` 的深度重算，不要照抄 `TASKS.md` 的相对路径。
 
 
 
