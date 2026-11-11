@@ -14,6 +14,8 @@
 
 ## 2. 构建 / 测试（必须单仓可跑）
 
+> **构建前置：Go ≥ 1.26.11**（`go.mod` 的 `go` directive 已钉在 `1.26.11`）。旧工具链（1.25.x）能编过，但会让 `govulncheck ./...` 红——那 9 条 stdlib 告警只能靠工具链解，降版验收不成立。理由记录见 `docs/runbook.md` §11。
+
 ```bash
 go build ./...
 go vet ./...

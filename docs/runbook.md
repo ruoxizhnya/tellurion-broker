@@ -288,3 +288,14 @@ QUERY=200                        {"client_order_id":"g4-real-2","broker_order_id
 | 7 | `POST /api/broker/emergency-flatten`（Mock 空仓） | 200，`sold=[] skipped=[] sold_total=0` |
 | 8.1 | `go test ./internal/httpapi -run TestDrill... -v` | `EXIT=0`，`503 idempotency_store_unavailable` → 恢复后 200 |
 | 8.2 | 真 PG 停库演练 | **已执行**：200 → 停库 503 `idempotency_store_unavailable` → 恢复 200（同一 ID 重投成功） |
+
+## 11. 依赖与工具链基线（兼容矩阵）
+
+| 项 | 版本 | 为什么是这个版本 |
+|---|---|---|
+| Go 工具链（`go.mod` `go` directive） | **1.26.11** | 2026-11-12 `BROKER-DEP-BUMP`。升级前 `govulncheck ./...` 共 12 条告警，其中 **9 条来自 stdlib**（`net/http` / `net/textproto` / `crypto/tls` / `crypto/x509`），最高要求修复版 `1.26.11`——**只能靠工具链解，不是无因升级**，也不是为了放宽验收。低于此版本构建仍可能编过，但 `govulncheck` 会红 |
+| `github.com/jackc/pgx/v5` | `v5.11.0` | 旧 `v5.7.3` 命中 GO-2026-5004（修复于 `v5.9.2`）；升级后 ackstore 9 条 PG 集成用例全 PASS，幂等映射语义无回归 |
+| `golang.org/x/text`（indirect） | `v0.44.0` | 旧 `v0.21.0` 命中 GO-2026-5970 / GO-2026-6629（修复于 `v0.41.0`） |
+| `github.com/ruoxizhnya/tellurion-contracts` | `v0.10.0` | CT-05 收编后的契约版本（`broker` 包为 wire 形状唯一 owner） |
+
+> 变更纪律：bump 后必须 `govulncheck ./...` EXIT=0 + `go build/vet/test ./... -count=1` 全绿；工具链或依赖降版必须同步改本表，否则视为无记录升级。
