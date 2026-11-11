@@ -1,5 +1,7 @@
 # tellurion-broker
 
+> 5 分钟了解本服务：[SERVICE.md](SERVICE.md)
+
 > module: `tellurion-broker` ｜ 状态：**服务已启动**——X6a 四 port + 内存 `Mock` + HTTP 面（G1）+ 持久幂等映射；`QT-45` ✅ 收口（终态 = Mock 全绿 + `XTPTrader` fail-closed 骨架）；`X6c`（真实 XTP 全量适配器）**⏸ 挂起**，重开条件见 [`docs/adr/0003-真钱通道暂不实施与重开条件.md`](docs/adr/0003-真钱通道暂不实施与重开条件.md)
 
 交易通道网关：`Mock` / `XTPTrader` = 同一 port 的两个实现（`MockTrader` 是 core 旧名，已随 2026-11-10 退役）。**落地前必须先有对账方案**。
