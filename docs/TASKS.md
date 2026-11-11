@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-11
-verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 3 条六字段单（`BROKER-DEP-BUMP` / `BROKER-AUTH-ADR` / `BROKER-RETRY-AFTER`），证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；本轮只立单不修复。此前 QT-45 / X6c 终态裁决（2026-11-10：主任授权执行侧裁定 ⇒ `QT-45` 收口 ✅（Mock 全绿 + fail-closed 骨架 + 装配闸为终态）、`X6c` 转 ⏸ 挂起（外部依赖 P1~P5，重开条件与流程见 ADR-0003）；B 组债务结论与 C 组验收清单保留）；QT-45 收口复核（2026-11-10：⑤ 三条判据逐条点名用例全绿，③ ① 「两实现」因 XTP 仍是 fail-closed 骨架未完成 ⇒ 🔶 → ⛔，唯一硬前置 = X6c P1~P5；同轮 core R4 退役已确认完成）；SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`、`main:pkg/backtest/execution/port.go` EXIT=0，叠加 G1 HTTP 面已落 ⇒ 两道前置全部解除，状态 ⛔ → ⬜；施工四步逐条列明，未做一步不勾；X6c 仍 ⛔）；G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
+last-verified: 2026-11-12
+verified-by: 2026-11-12 全面审查 W7 三单收口（`BROKER-DEP-BUMP`：pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0，破坏验证降版复红/还原复绿，ackstore PG 集成腿因本机无 `BROKER_TEST_DSN` 未跑并登记重开条件；`BROKER-AUTH-ADR`：新增 ADR-0004 固化鉴权姿态与 kit JWT 分叉例外 + runbook §2.1 轮换 + api-schema 指回，未改代码；`BROKER-RETRY-AFTER`：429 `rate_limited` 补 `Retry-After`（值来自 `rateLimitedRetryAfter` 常量）+ 2 条用例 + 破坏验证，全量 build/vet/test 绿）；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 3 条六字段单，证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；此前 QT-45 / X6c 终态裁决（2026-11-10：主任授权执行侧裁定 ⇒ `QT-45` 收口 ✅（Mock 全绿 + fail-closed 骨架 + 装配闸为终态）、`X6c` 转 ⏸ 挂起（外部依赖 P1~P5，重开条件与流程见 ADR-0003）；B 组债务结论与 C 组验收清单保留）；QT-45 收口复核（2026-11-10：⑤ 三条判据逐条点名用例全绿，③ ① 「两实现」因 XTP 仍是 fail-closed 骨架未完成 ⇒ 🔶 → ⛔，唯一硬前置 = X6c P1~P5；同轮 core R4 退役已确认完成）；SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`、`main:pkg/backtest/execution/port.go` EXIT=0，叠加 G1 HTTP 面已落 ⇒ 两道前置全部解除，状态 ⛔ → ⬜；施工四步逐条列明，未做一步不勾；X6c 仍 ⛔）；G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -14,7 +14,7 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 
 > 本节 = 本轮（2026-11-11）台账重整后剩下的挂起项（`X6c` 及其派生项）+ 全面审查 W7 新立 3 单（`BROKER-DEP-BUMP` / `BROKER-AUTH-ADR` / `BROKER-RETRY-AFTER`）。此前已收口单的正文与施工记录全部在归档文件里。
 >
-> **2026-11-12 进展**：`BROKER-DEP-BUMP` ✅、`BROKER-AUTH-ADR` ✅ 已收口（前者 pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0，PG 集成腿因本机无 `BROKER_TEST_DSN`/口令如实记为未跑并登记重开条件；后者新增 ADR-0004 + runbook §2.1 轮换 + api-schema 指回，未改代码行为），原文与落账见 [`archive/tasks-archive-2026-11.md`](archive/tasks-archive-2026-11.md#BROKER-DEP-BUMP)。本节仅剩 `BROKER-RETRY-AFTER`。
+> **2026-11-12 进展**：全面审查 W7 三单**全部收口** ✅ —— `BROKER-DEP-BUMP`（pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0；PG 集成腿因本机无 `BROKER_TEST_DSN`/口令如实记为未跑并登记重开条件）、`BROKER-AUTH-ADR`（新增 ADR-0004 + runbook §2.1 轮换 + api-schema 指回，未改代码行为）、`BROKER-RETRY-AFTER`（429 `rate_limited` 补 `Retry-After` + 两条用例 + 破坏验证）。原文与落账见 [`archive/tasks-archive-2026-11.md`](archive/tasks-archive-2026-11.md#BROKER-DEP-BUMP)。本节回到「只剩 `X6c` 派生项」。
 
 ### X6c · 真钱通道（XTP 全量适配器）[P1] ⏸（外部依赖）
 
@@ -35,16 +35,6 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑤ 验收**：换装配实现后 `/version.channel` 随之变化；破坏验证 = 改回常量 ⇒ 用例红。
 - **⑥ 边界**：本仓 server 装配；core 侧消费归 `tellurion`（`CORE-BROKER-RUNTIME-RECHECK`）。
 - **重开条件**：`X6c` 重开时**必须同批完成**（属 X6c 的准入项，不可单独跳过）。
-
-### BROKER-RETRY-AFTER · 429 `rate_limited` 不带 Retry-After [P3] ⬜
-
-- **① 目标**：让本仓唯一的 429（`rate_limited`）带 `Retry-After` 头，调用方知道何时重试，与 risk 等兄弟仓口径一致。
-- **② 上下文（2026-11-11 全面审查 W2-F6，证据 ODR-069 `tellurion-docs:docs/archive/odr/odr-069-audit-wave2-core-architecture.md`）**：`internal/httpapi/httpapi.go:253-254` `case errors.Is(err, gateway.ErrRateLimited): return http.StatusTooManyRequests, "rate_limited"`，经 `writeError`/`writeJSON`（`:227-228`）输出，**不设 `Retry-After`**（grep 全 httpapi 零命中）。对照 risk `internal/httpapi/auth.go:96` 限流 429 带 `Retry-After: 1`。注意本仓 429 是 `rate_limited`（网关 `ErrRateLimited` 哨兵），**不是** orchestration 的 `queue_full`。
-- **③ 要求**：① 429 `rate_limited` 响应带 `Retry-After`（值与兄弟仓同口径，建议 `1`，或按网关限流窗口定）；② `docs/api-schema.md` 登记该码的 `Retry-After` 口径；③ 补一条用例断言 429 响应头含非空 `Retry-After`。
-- **④ 约束与非目标**：不改 `ErrRateLimited` 的触发条件与网关限流逻辑；不改其余 11 个哨兵的 status/code 映射；不引入身份令牌桶（本仓 HTTP 层限流是另一回事，若要做另立单，不在本单）；不动写侧鉴权。
-- **⑤ 验收**：用例断言 `rate_limited` 429 + `Retry-After` 非空；破坏验证 = 去掉头设置 ⇒ 用例红，还原复绿；`go build/vet/test ./... -count=1` 全绿。
-- **⑥ 边界**：本仓 `internal/httpapi/httpapi.go` 的 429 写头 + `docs/api-schema.md` + 一条用例；orchestration 的限流与 queue_full Retry-After 归 `tellurion-orchestration:docs/TASKS.md` → `ORCH-RATELIMIT`。
-- **owner**：待定
 
 ## 二、跨仓指针（不在本仓，勿双写）
 

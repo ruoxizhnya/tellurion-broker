@@ -17,6 +17,7 @@
 | SVC-BROKER-G4 | 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G4)；[`ADR 0003`](adr/0003-真钱通道暂不实施与重开条件.md)；[`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) |
 | BROKER-DEP-BUMP | pgx / x-text 落在已知漏洞版本（govulncheck EXIT=1） | 2026-11-12 | 见 `git log --grep BROKER-DEP-BUMP` | [原文](#BROKER-DEP-BUMP) |
 | BROKER-AUTH-ADR | 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 | 2026-11-12 | 见 `git log --grep BROKER-AUTH-ADR` | [原文](#BROKER-AUTH-ADR)；[ADR 0004](adr/0004-鉴权姿态与静态token分叉.md) |
+| BROKER-RETRY-AFTER | 429 `rate_limited` 不带 Retry-After | 2026-11-12 | 见 `git log --grep BROKER-RETRY-AFTER` | [原文](#BROKER-RETRY-AFTER) |
 
 ---
 
@@ -359,6 +360,23 @@
 - **⑤ 验收**：ADR-0004 存在且 Status=Accepted、含 Context/Decision/Consequences 与「dev-only / X6c 重开重裁」边界；runbook 有轮换步骤；api-schema 有指回链接；链接巡检活跃层 0 断链。
 - **⑥ 边界**：本仓 `docs/adr/` + `docs/runbook.md` + `docs/api-schema.md` 鉴权节。
 - **落账（2026-11-12，commit 见 `git log --grep BROKER-AUTH-ADR`）**：新增 ADR-0004（状态=已裁决，含决策 5 条、轮换方式、代价、否决替代、三条重开条件）；`runbook.md` 新增 §2.1 轮换步骤（8 步，写明**单 token 槽位、无热加载 ⇒ 无平滑窗口**，窗口内写请求 401）；`api-schema.md` §1.5 鉴权节加「裁决依据」行指回 ADR-0004 与 runbook §2.1；`adr/README.md` 索引登记。**未改任何代码行为**（`requireToken` 未动）。链接巡检（活跃层 + 含归档层）：活跃层 0 断链；归档层遗留坏链见下方「已知遗留」。
+
+<a id="BROKER-RETRY-AFTER"></a>
+### BROKER-RETRY-AFTER · 429 `rate_limited` 不带 Retry-After [P3] ✅（2026-11-12）
+
+- **① 目标**：让本仓唯一的 429（`rate_limited`）带 `Retry-After` 头，调用方知道何时重试，与 risk 等兄弟仓口径一致。
+- **② 上下文（2026-11-11 全面审查 W2-F6，证据 ODR-069 `tellurion-docs:docs/archive/odr/odr-069-audit-wave2-core-architecture.md`）**：`internal/httpapi/httpapi.go:253-254` `case errors.Is(err, gateway.ErrRateLimited): return http.StatusTooManyRequests, "rate_limited"`，经 `writeError`/`writeJSON`（`:227-228`）输出，**不设 `Retry-After`**（grep 全 httpapi 零命中）。对照 risk `internal/httpapi/auth.go:96` 限流 429 带 `Retry-After: 1`。注意本仓 429 是 `rate_limited`（网关 `ErrRateLimited` 哨兵），**不是** orchestration 的 `queue_full`。
+- **③ 要求**：① 429 `rate_limited` 响应带 `Retry-After`（值与兄弟仓同口径，建议 `1`，或按网关限流窗口定）；② `docs/api-schema.md` 登记该码的 `Retry-After` 口径；③ 补一条用例断言 429 响应头含非空 `Retry-After`。
+- **④ 约束与非目标**：不改 `ErrRateLimited` 的触发条件与网关限流逻辑；不改其余 11 个哨兵的 status/code 映射；不引入身份令牌桶（本仓 HTTP 层限流是另一回事，若要做另立单，不在本单）；不动写侧鉴权。
+- **⑤ 验收**：用例断言 `rate_limited` 429 + `Retry-After` 非空；破坏验证 = 去掉头设置 ⇒ 用例红，还原复绿；`go build/vet/test ./... -count=1` 全绿。
+- **⑥ 边界**：本仓 `internal/httpapi/httpapi.go` 的 429 写头 + `docs/api-schema.md` + 一条用例；orchestration 的限流与 queue_full Retry-After 归 `tellurion-orchestration:docs/TASKS.md` → `ORCH-RATELIMIT`。
+- **落账（2026-11-12，commit 见 `git log --grep BROKER-RETRY-AFTER`）**：
+  - **值的来源（不是随便写的常数）**：本仓**不持有柜台限流窗口**——`ErrRateLimited` 由通道/柜台产生，重试窗口在柜台侧，本仓拿不到。因此新增 `const rateLimitedRetryAfter = 1 * time.Second`，注释写明它是「本仓声明的最小退避单位、与 risk 等兄弟仓 429 同口径」，并写死「若将来通道能带出窗口，应由错误携带窗口后在此换算，不得再写第二个常数」。头值由该常量换算（`strconv.Itoa(int(rateLimitedRetryAfter/time.Second))`），口径只在这一处。
+  - **结构性收口**：新增 `writeGatewayError(w, err, ack)` 作为 port 错误的**唯一出口**（`wireStatus` → 429 追加 `Retry-After` → 分派 `writeOrderError`/`writeError`），8 个 handler 的错误分支全部改走它。行为映射与原实现逐字一致（其余 11 个哨兵 status/code 不变），收益是「本仓唯一的 429 一定带头」不再依赖每个 handler 自觉。
+  - **用例**：`TestRateLimitedCarriesRetryAfter`（429 + 头非空 + 可 `Atoi` 解析 + 值 == `rateLimitedRetryAfter` 换算值）、`TestSuccessResponseHasNoRetryAfter`（200 不得带头）。
+  - **破坏验证**：把 `if status == http.StatusTooManyRequests` 改成 `if false && …` ⇒ `TestRateLimitedCarriesRetryAfter` 红（`httpapi_test.go:301: Retry-After 缺失`）；还原后复绿。
+  - **门禁**：`gofmt -l .` 空；`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全 EXIT=0（6 包 ok）。
+  - 文档：`docs/api-schema.md` §2 `rate_limited` 行登记 `Retry-After` 必带、值口径与位置。
 
 ### 已知遗留（2026-11-12 巡检发现，**非本轮引入，未修**）
 

@@ -180,7 +180,7 @@ DTO 形状与逐字段判据见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.3；方
 | `order_not_found` | `ErrOrderNotFound` | 网关**能证明**从未发送过该 ID | 否 | 可按新单处理（由调用方决定）；不得据此推断柜台侧不存在 |
 | `order_not_cancelable` | `ErrOrderNotCancelable` | 已成交 / 已过期 / 已终态，不可撤 | 否 | 查单取终态；不重试撤单 |
 | `invalid_order` | `ErrInvalidOrder` | 参数不合法 / 违反申报数量规则 | 否 | 修参数后重新提交（**新** `ClientOrderID`） |
-| `rate_limited` | `ErrRateLimited` | 柜台限流，且**确定未送达** | 否 | 退避后可用**同一** `ClientOrderID` 重试 |
+| `rate_limited` | `ErrRateLimited` | 柜台限流，且**确定未送达** | 否 | 退避后可用**同一** `ClientOrderID` 重试；响应**必带 `Retry-After`（整数秒）**——本仓不持有柜台限流窗口，取本仓声明的最小退避单位 `1`（`internal/httpapi/httpapi.go` `rateLimitedRetryAfter`，与 risk 等兄弟仓同口径），调用方按该值退避而非立即重发 |
 | `not_supported` | `ErrNotSupported` | 通道不支持该能力（如 XTP 未实现 `QueryFills`） | 否 | 降级或拒绝；**禁止**伪造成功形状 |
 | `account_mismatch` | `ErrAccountMismatch` | `accountID` 不属于本通道 | 否 | 配置错误，fail-loud |
 | `insufficient_buying_power` | `ErrInsufficientBuyingPower` | 柜台明确返回买力不足 | 是（已拒绝） | 不重试；告警 |

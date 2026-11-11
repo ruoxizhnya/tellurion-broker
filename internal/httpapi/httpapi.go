@@ -15,11 +15,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"tellurion-broker/internal/gateway"
 )
+
+// rateLimitedRetryAfter 是 429 `rate_limited` 的 `Retry-After` 值。
+//
+// 本仓**不持有柜台限流窗口**：`ErrRateLimited` 由通道/柜台产生（见
+// docs/api-schema.md §2），重试窗口在柜台侧，本仓拿不到。因此这里声明的是
+// 本仓的**最小退避单位**，与 risk 等兄弟仓的 429 同口径（1s）——而不是一个
+// 与任何窗口都对不上的魔数。若将来通道能把具体窗口带出来，应由错误携带
+// 窗口并在此换算，**不得**再写第二个常数。
+const rateLimitedRetryAfter = 1 * time.Second
 
 // Config 是 HTTP 面的装配参数。四个依赖都必须是已装配的 port 实现。
 type Config struct {
@@ -96,8 +106,7 @@ func (s *Server) handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	ack, err := s.cfg.Gateway.PlaceOrder(r.Context(), req)
 	if err != nil {
-		status, code := wireStatus(err)
-		writeOrderError(w, status, code, err, ack)
+		writeGatewayError(w, err, ack)
 		return
 	}
 	writeJSON(w, http.StatusOK, ack)
@@ -108,8 +117,7 @@ func (s *Server) handleCancelOrder(w http.ResponseWriter, r *http.Request) {
 		ClientOrderID: r.PathValue("clientOrderID"),
 	})
 	if err != nil {
-		status, code := wireStatus(err)
-		writeOrderError(w, status, code, err, nil)
+		writeGatewayError(w, err, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, state)
@@ -118,8 +126,7 @@ func (s *Server) handleCancelOrder(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleQueryOrder(w http.ResponseWriter, r *http.Request) {
 	state, err := s.cfg.Gateway.QueryOrder(r.Context(), r.PathValue("clientOrderID"))
 	if err != nil {
-		status, code := wireStatus(err)
-		writeOrderError(w, status, code, err, nil)
+		writeGatewayError(w, err, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, state)
@@ -128,8 +135,7 @@ func (s *Server) handleQueryOrder(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePositions(w http.ResponseWriter, r *http.Request) {
 	positions, err := s.cfg.Gateway.QueryPositions(r.Context(), r.PathValue("accountID"))
 	if err != nil {
-		status, code := wireStatus(err)
-		writeError(w, status, code, err.Error())
+		writeGatewayError(w, err, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, positions)
@@ -138,8 +144,7 @@ func (s *Server) handlePositions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 	snapshot, err := s.cfg.Gateway.QueryAccount(r.Context(), r.PathValue("accountID"))
 	if err != nil {
-		status, code := wireStatus(err)
-		writeError(w, status, code, err.Error())
+		writeGatewayError(w, err, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)
@@ -153,8 +158,7 @@ func (s *Server) handleFills(w http.ResponseWriter, r *http.Request) {
 	}
 	fills, err := s.cfg.Gateway.QueryFills(r.Context(), r.PathValue("accountID"), since)
 	if err != nil {
-		status, code := wireStatus(err)
-		writeError(w, status, code, err.Error())
+		writeGatewayError(w, err, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, fills)
@@ -168,8 +172,7 @@ func (s *Server) handleSettlement(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshot, err := s.cfg.Settlement.QuerySettlement(r.Context(), r.PathValue("accountID"), asOf)
 	if err != nil {
-		status, code := wireStatus(err)
-		writeError(w, status, code, err.Error())
+		writeGatewayError(w, err, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)
@@ -189,8 +192,7 @@ func (s *Server) handleEmergencyFlatten(w http.ResponseWriter, r *http.Request) 
 	}
 	result, err := s.cfg.KillSwitch.EmergencyFlatten(r.Context(), body.Reason)
 	if err != nil {
-		status, code := wireStatus(err)
-		writeError(w, status, code, err.Error())
+		writeGatewayError(w, err, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -226,6 +228,21 @@ type errorBody struct {
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, errorBody{Code: code, Message: message})
+}
+
+// writeGatewayError 是 port 错误的**唯一出口**：先按 wireStatus 映射，再在
+// 429 上追加 `Retry-After`。放在这里而不是各 handler 里，是为了让「本仓唯一
+// 的 429 = rate_limited 一定带头」成为结构性保证——新增 handler 也不会漏。
+func writeGatewayError(w http.ResponseWriter, err error, ack *gateway.OrderAck) {
+	status, code := wireStatus(err)
+	if status == http.StatusTooManyRequests {
+		w.Header().Set("Retry-After", strconv.Itoa(int(rateLimitedRetryAfter/time.Second)))
+	}
+	if ack != nil {
+		writeOrderError(w, status, code, err, ack)
+		return
+	}
+	writeError(w, status, code, err.Error())
 }
 
 func writeOrderError(w http.ResponseWriter, status int, code string, err error, ack *gateway.OrderAck) {

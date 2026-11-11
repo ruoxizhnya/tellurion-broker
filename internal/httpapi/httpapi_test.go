@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -274,4 +276,70 @@ func TestAllTwelveSentinelCodesMapToWireCodes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// 429 是本仓唯一的限流出口（rate_limited）：必须带可解析的 Retry-After，
+// 且值等于本仓声明的退避单位（不是随手写的常数）。
+func TestRateLimitedCarriesRetryAfter(t *testing.T) {
+	wrapped := errors.Join(errors.New("stub"), gateway.ErrRateLimited)
+	h := New(Config{
+		Gateway:    stubGateway{err: wrapped},
+		Settlement: stubSettlement{err: wrapped},
+		KillSwitch: stubKillSwitch{err: wrapped},
+		WriteToken: "secret",
+	}).Handler()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	resp := doResp(t, srv, http.MethodPost, "/api/broker/orders", `{}`, "secret")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	raw := resp.Header.Get("Retry-After")
+	if raw == "" {
+		t.Fatal("Retry-After 缺失：429 rate_limited 必须告诉调用方何时重试")
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil {
+		t.Fatalf("Retry-After = %q, 必须是整数秒: %v", raw, err)
+	}
+	if want := int(rateLimitedRetryAfter / time.Second); secs != want {
+		t.Fatalf("Retry-After = %d, want %d (rateLimitedRetryAfter)", secs, want)
+	}
+}
+
+// 成功响应不得带 Retry-After（否则会把调用方引到无谓的退避）。
+func TestSuccessResponseHasNoRetryAfter(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp := doResp(t, srv, http.MethodPost, "/api/broker/orders",
+		`{"client_order_id":"c-ra-ok","account_id":"ACC-1","symbol":"600000","side":"buy","order_type":"market","quantity":100}`,
+		"secret")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Retry-After"); got != "" {
+		t.Fatalf("成功响应带了 Retry-After = %q，want empty", got)
+	}
+}
+
+func doResp(t *testing.T, srv *httptest.Server, method, path, body, token string) *http.Response {
+	t.Helper()
+	var rd io.Reader
+	if body != "" {
+		rd = bytes.NewBufferString(body)
+	}
+	r, err := http.NewRequest(method, srv.URL+path, rd)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if token != "" {
+		r.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := srv.Client().Do(r)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	return resp
 }
