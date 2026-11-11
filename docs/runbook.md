@@ -66,7 +66,20 @@ $env:BROKER_DATABASE_DSN = 'postgres://postgres@127.0.0.1:5446/tellurion_broker_
 
 预期：连接失败时进程以非 0 退出，日志首行为 `brokergateway: idempotency store: ...`。**没有 PG 就不要起持久实例**，也不要把 DSN 换成内存实现来“先跑起来”——那会把幂等事故藏到真钱路径上。
 
-写侧 token：`BROKER_SERVICE_TOKEN` 未设 = 写面关闭（`503 writes_disabled`），不是“不校验”。读侧无鉴权（G1 的现状）。
+写侧 token：`BROKER_SERVICE_TOKEN` 未设 = 写面关闭（`503 writes_disabled`），不是“不校验”。读侧无鉴权（G1 的现状）。**鉴权姿态的裁决依据见 [`adr/0004-鉴权姿态与静态token分叉.md`](adr/0004-鉴权姿态与静态token分叉.md)**——写侧静态 token、读侧只读无鉴权、与 kit JWT 体系的分叉是显式例外，不是遗漏。
+
+### 2.1 写侧 token 轮换（含兼容窗口）
+
+> 前提事实：实现只有**一个 token 槽位**（`internal/httpapi/httpapi.go:74-89`，`subtle.ConstantTimeCompare` 精确匹配）、**无热加载**。所以轮换 = 改环境变量 + 重启网关，**不存在双 token 并存的平滑窗口**；兼容窗口 = 网关重启到调用方换新 token 之间的间隔，其间写请求返回 `401 unauthorized`（显式失败，不静默放行）。
+
+1. **挑时点**：低峰且**无在途写单**。先查最近成交/持仓确认没有正在飞的单（本仓无「列出全部订单」读面，只能按已知 `client_order_id` 查）。
+2. **记指纹，不记明文**：记录旧 token 的长度与 SHA256 指纹（`[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($env:BROKER_SERVICE_TOKEN)))`），禁止把明文写进工单 / 聊天 / 文档。
+3. **生成新 token**：32 字节以上随机串，只经进程级或用户级环境变量注入——**禁止**写入 `docker-compose.yml` / `.env` / 任何会入库的文件。
+4. **改网关并重启**：更新网关进程的 `BROKER_SERVICE_TOKEN` 后重启（重启会重跑装配闸，见 §3）。此时旧 token 立即失效。
+5. **改调用方并重启**：调用方（core）同步换新 token 并重启，**顺序不能反**——先网关后调用方，窗口内写请求 401 而不是「新旧都放行」。
+6. **验证**：旧 token 打写端点必须 `401 unauthorized`；新 token 必须 `200`；读侧 5 条路由不受影响（本就无鉴权）。空 token 启动必须仍是 `503 writes_disabled`。
+7. **窗口内的在途单**：若窗口前已发出订单、窗口后拿到 `unknown_state` 或 `401`，按 §5 排查；**严禁换 `client_order_id` 重发**。
+8. **回滚**：恢复旧 token 重启（同样受上述窗口约束）；回滚前先确认窗口内的写请求已全部按 §5 收口。
 
 ## 3. 看装配闸为什么拒
 

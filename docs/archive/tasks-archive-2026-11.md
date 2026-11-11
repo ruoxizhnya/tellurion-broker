@@ -16,6 +16,7 @@
 | R10 | 幂等映射读失败的哨兵从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`（㉒ 已裁「现在修」） | 2026-11-07 | —（原文未记） | [原文](#R10) |
 | SVC-BROKER-G4 | 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G4)；[`ADR 0003`](adr/0003-真钱通道暂不实施与重开条件.md)；[`x6c-xtp-readiness.md`](x6c-xtp-readiness.md) |
 | BROKER-DEP-BUMP | pgx / x-text 落在已知漏洞版本（govulncheck EXIT=1） | 2026-11-12 | 见 `git log --grep BROKER-DEP-BUMP` | [原文](#BROKER-DEP-BUMP) |
+| BROKER-AUTH-ADR | 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 | 2026-11-12 | 见 `git log --grep BROKER-AUTH-ADR` | [原文](#BROKER-AUTH-ADR)；[ADR 0004](adr/0004-鉴权姿态与静态token分叉.md) |
 
 ---
 
@@ -347,4 +348,24 @@
   - **破坏验证**：`go get github.com/jackc/pgx/v5@v5.7.3` ⇒ `govulncheck` **EXIT=3**，报 `GO-2026-5004 / github.com/jackc/pgx/v5@v5.7.3`；从备份**逐字节还原** go.mod / go.sum（SHA256 与备份一致）⇒ **EXIT=0**。
   - **真实缺口（如实登记，未冒充跑过）**：`internal/ackstore` 的 **PG 集成腿未运行**。本机 `PostgreSQL 16.15`（`127.0.0.1:5432`）的 `pg_hba.conf` 全量 `scram-sha-256`，环境无 `BROKER_TEST_DSN` / 口令，按约束不得改认证方式、不猜口令。实测 `go test ./internal/ackstore -v -count=1`：4 条纯函数用例 PASS，9 条 PG 用例 `SKIP`（`BROKER_TEST_DSN is not set`）。**重开条件**：拿到 `BROKER_TEST_DSN`（含口令、`tellurion_broker_test` 库）后重跑 `go test ./internal/ackstore -count=1 -v`，确认 9 条 PG 用例 PASS 且 `pgxpool` / `pgx.ErrNoRows` / `ON CONFLICT` 语义无回归。
   - **口径订正**：派单文字里的 `TEST_DATABASE_DSN` 在本仓**不存在**；真实门控变量是 `BROKER_TEST_DSN`（`internal/ackstore/pg_test.go:20`）。
+
+<a id="BROKER-AUTH-ADR"></a>
+### BROKER-AUTH-ADR · 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 [P2] ✅（2026-11-12）
+
+- **① 目标**：把本仓「写侧静态 `BROKER_SERVICE_TOKEN` + 读侧开放靠端口隔离」的鉴权姿态固化成一条 ADR，显式登记它与兄弟仓 kit JWT service-token 的**分叉例外**，并在 runbook 写清 token 轮换——而不是让这套决定只散在代码注释里。
+- **② 上下文（2026-11-11 全面审查 W2-F4，证据 ODR-069 `tellurion-docs:docs/archive/odr/odr-069-audit-wave2-core-architecture.md`；裁决 D11=b）**：`internal/httpapi/httpapi.go:74-89` `requireToken`——空 `WriteToken` ⇒ 503 `writes_disabled`（fail-closed）、`subtle.ConstantTimeCompare` 常量时间比较、不匹配 ⇒ 401 `unauthorized`；挂在 3 条写端点。**5 条 GET 读端点不鉴权**，靠默认回环端口隔离。兄弟仓（data/risk/analytics/strategy/orch）走 kit `auth/httpadapter` 的 JWT service-token + 策略表，本仓是**静态 token 分叉**。
+- **③ 要求**：① 新增 `docs/adr/0004-鉴权姿态与静态token分叉.md`；② `docs/runbook.md` 补 `BROKER_SERVICE_TOKEN` 轮换步骤与「空 token = 写面关闭」语义；③ `docs/api-schema.md` 鉴权节加指回 ADR；④ `docs/adr/README.md` 索引登记。
+- **④ 约束与非目标**：**本轮不改鉴权代码**（不迁 kit JWT、不动 `requireToken`、不给读端点加闸）——纯决策固化 + 文档；不放宽 fail-closed；不把静态 token 表述成「生产级鉴权」；真钱形态的鉴权重裁归 X6c。
+- **⑤ 验收**：ADR-0004 存在且 Status=Accepted、含 Context/Decision/Consequences 与「dev-only / X6c 重开重裁」边界；runbook 有轮换步骤；api-schema 有指回链接；链接巡检活跃层 0 断链。
+- **⑥ 边界**：本仓 `docs/adr/` + `docs/runbook.md` + `docs/api-schema.md` 鉴权节。
+- **落账（2026-11-12，commit 见 `git log --grep BROKER-AUTH-ADR`）**：新增 ADR-0004（状态=已裁决，含决策 5 条、轮换方式、代价、否决替代、三条重开条件）；`runbook.md` 新增 §2.1 轮换步骤（8 步，写明**单 token 槽位、无热加载 ⇒ 无平滑窗口**，窗口内写请求 401）；`api-schema.md` §1.5 鉴权节加「裁决依据」行指回 ADR-0004 与 runbook §2.1；`adr/README.md` 索引登记。**未改任何代码行为**（`requireToken` 未动）。链接巡检（活跃层 + 含归档层）：活跃层 0 断链；归档层遗留坏链见下方「已知遗留」。
+
+### 已知遗留（2026-11-12 巡检发现，**非本轮引入，未修**）
+
+`docs/archive/tasks-archive-2026-11.md` 里由 2026-11-11 迁移保留下来的相对链接共 11 条断链：`adr/0002-…`、`adr/0003-…`、`x6c-xtp-readiness.md`、`ARCHITECTURE.md`。原因 = 归档文件位于 `docs/archive/`，比原 `docs/TASKS.md` 深一层，迁移时按「逐字搬入、未改写」保留原相对路径，因此 `../` 少了一级。
+
+- **为什么本轮不修**：本文件的章程是「逐字搬入、未改写」，改链接等于改写归档正文；且这是文档结构问题，不属于三张施工单的范围。
+- **处置建议（待决策）**：另立一条文档单，二选一：① 对这 11 条链接做 `../` 前缀订正并在此登记「归档层路径订正，非内容改写」；② 在 `docs/archive/README.md` 声明归档层不做链接巡检豁免并挂起。**未立单前不修**。
+
+
 

@@ -14,7 +14,7 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 
 > 本节 = 本轮（2026-11-11）台账重整后剩下的挂起项（`X6c` 及其派生项）+ 全面审查 W7 新立 3 单（`BROKER-DEP-BUMP` / `BROKER-AUTH-ADR` / `BROKER-RETRY-AFTER`）。此前已收口单的正文与施工记录全部在归档文件里。
 >
-> **2026-11-12 进展**：`BROKER-DEP-BUMP` ✅ 已收口（pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0；PG 集成腿因本机无 `BROKER_TEST_DSN`/口令如实记为未跑并登记重开条件），原文与落账见 [`archive/tasks-archive-2026-11.md`](archive/tasks-archive-2026-11.md#BROKER-DEP-BUMP)。本节仅剩 `BROKER-AUTH-ADR` / `BROKER-RETRY-AFTER`。
+> **2026-11-12 进展**：`BROKER-DEP-BUMP` ✅、`BROKER-AUTH-ADR` ✅ 已收口（前者 pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0，PG 集成腿因本机无 `BROKER_TEST_DSN`/口令如实记为未跑并登记重开条件；后者新增 ADR-0004 + runbook §2.1 轮换 + api-schema 指回，未改代码行为），原文与落账见 [`archive/tasks-archive-2026-11.md`](archive/tasks-archive-2026-11.md#BROKER-DEP-BUMP)。本节仅剩 `BROKER-RETRY-AFTER`。
 
 ### X6c · 真钱通道（XTP 全量适配器）[P1] ⏸（外部依赖）
 
@@ -35,16 +35,6 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑤ 验收**：换装配实现后 `/version.channel` 随之变化；破坏验证 = 改回常量 ⇒ 用例红。
 - **⑥ 边界**：本仓 server 装配；core 侧消费归 `tellurion`（`CORE-BROKER-RUNTIME-RECHECK`）。
 - **重开条件**：`X6c` 重开时**必须同批完成**（属 X6c 的准入项，不可单独跳过）。
-
-### BROKER-AUTH-ADR · 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 [P2] ⬜
-
-- **① 目标**：把本仓「写侧静态 `BROKER_SERVICE_TOKEN` + 读侧开放靠端口隔离」的鉴权姿态固化成一条 ADR，显式登记它与兄弟仓 kit JWT service-token 的**分叉例外**，并在 runbook 写清 token 轮换——而不是让这套决定只散在代码注释里。
-- **② 上下文（2026-11-11 全面审查 W2-F4，证据 ODR-069 `tellurion-docs:docs/archive/odr/odr-069-audit-wave2-core-architecture.md`；裁决 D11=b：保留 dev-only 静态 token + 登记例外 + runbook 轮换，本轮不迁 kit JWT）**：`internal/httpapi/httpapi.go:74-89` `requireToken`——空 `WriteToken` ⇒ 503 `writes_disabled`（fail-closed ✅）、`subtle.ConstantTimeCompare` 常量时间比较 ✅、不匹配 ⇒ 401 `unauthorized` ✅；挂在 3 条写端点（POST orders / DELETE orders / POST emergency-flatten）。**5 条 GET 读端点不鉴权**（`:63` orders/{id}、`:65` positions、`:66` account、`:67` fills、`:68` settlement），靠默认回环端口隔离。兄弟仓（data/risk/analytics/strategy/orch）走 kit `auth/httpadapter` 的 JWT service-token + 策略表，本仓是**静态 token 分叉**。`docs/adr/` 现有 0001/0002/0003，无鉴权姿态 ADR。
-- **③ 要求**：① 新增 `docs/adr/0004-鉴权姿态与静态token分叉.md`（编号续 0003），记录：为何写侧用静态 token（Mock MVP + 单人自托管）、为何读侧开放（端口隔离）、与 kit JWT 兄弟仓的分叉是**显式接受的例外**、dev-only 边界（上真钱前必须重裁，挂 X6c 准入）；② `docs/runbook.md` 补 `BROKER_SERVICE_TOKEN` 轮换步骤与「空 token = 写面关闭」语义；③ `docs/api-schema.md` 鉴权节加指回 ADR；④ `docs/adr/README.md` 索引登记。
-- **④ 约束与非目标**：**本轮不改鉴权代码**（不迁 kit JWT、不动 `requireToken`、不给读端点加闸）——纯决策固化 + 文档；不放宽 fail-closed；不把静态 token 表述成「生产级鉴权」；真钱形态的鉴权重裁归 X6c。
-- **⑤ 验收**：ADR-0004 存在且 Status=Accepted、含 Context/Decision/Consequences 与「dev-only / X6c 重开重裁」边界；runbook 有轮换步骤；api-schema 有指回链接；链接巡检活跃层 0 断链。
-- **⑥ 边界**：本仓 `docs/adr/` + `docs/runbook.md` + `docs/api-schema.md` 鉴权节；鉴权实现升级（若将来迁 kit）另立单挂 X6c。
-- **owner**：待定
 
 ### BROKER-RETRY-AFTER · 429 `rate_limited` 不带 Retry-After [P3] ⬜
 
