@@ -26,6 +26,7 @@ go test ./...
 - 可选集成测试（无外部条件时自动 skip）：`BROKER_TEST_DSN='postgres://postgres@127.0.0.1:5432/tellurion_broker_test?sslmode=disable' go test ./internal/ackstore -count=1`（测 `broker.order_acks` 的原子占位 / 跨实例回读）。
 - 若某一步需要别的仓的源码目录才过，那是**边界画错了**——停下来修边界，**不要**加 `replace ../xxx` 绕过。
 - 本机同时改多个仓时可用 `go.work` 联调，但**它不入库**（`.gitignore` 已挡）。
+- CI（`.github/workflows/ci.yml`，单 job `go`）：`gofmt -l .` → `go build ./...` → `go vet ./...` → `govulncheck@latest ./...`（依赖漏洞门，X-DEP-BUMP-CONSUMERS）→ `go test ./... -count=1` → `go test -race ./... -count=1`（竞态门，X-CI-RACE-STATICCHECK）→ `staticcheck@latest ./...`（`go install` 后跑，未钉版本）。
 
 ## 3. 边界（硬约束）
 
@@ -52,7 +53,7 @@ go test ./...
 | 依赖 | 版本 | 说明 |
 |---|---|---|
 | `github.com/ruoxizhnya/tellurion-contracts` | `v0.10.0`（2026-11-10 升，`c00d9b1`） | `broker` 包 = 订单 / 成交 / 持仓 / 账户 / 紧急清仓 wire 形状的唯一 owner；本仓 `internal/gateway/model.go` 只留类型别名（CT-05 收编） |
-| `github.com/ruoxizhnya/tellurion-kit` | 未引入（远端最新 `v0.2.0`，2026-11-10 发版；`v0.1.4` 为 2026-10-25 的前一版） | 日志 / HTTP |
+| `github.com/ruoxizhnya/tellurion-kit` | 未引入（远端最新 `v0.5.0`，2026-11-12 核实） | 日志 / HTTP |
 | `github.com/jackc/pgx/v5` | `v5.11.0`（2026-11-12 升，`BROKER-DEP-BUMP`） | `internal/ackstore` 的 PG 连接池与查询（幂等映射 `broker.order_acks`，ADR 0002）；旧 `v5.7.3` 命中 GO-2026-5004（修复于 `v5.9.2`） |
 | `golang.org/x/text`（indirect） | `v0.44.0`（2026-11-12 随 `go mod tidy` 升） | pgx 的传递依赖；旧 `v0.21.0` 命中 GO-2026-5970 / GO-2026-6629（`x/text/secure/precis` panic，修复于 `v0.41.0`） |
 | Go 工具链（`go` directive） | `1.26.11`（2026-11-12 升） | 旧 `1.25` 使 stdlib 命中 9 条告警（`net/http` / `net/textproto` / `crypto/tls` / `crypto/x509`，最高要求修复版 `1.26.11`）；`govulncheck ./...` EXIT=0 的前提 |
