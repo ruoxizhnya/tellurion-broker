@@ -18,6 +18,7 @@
 | BROKER-DEP-BUMP | pgx / x-text 落在已知漏洞版本（govulncheck EXIT=1） | 2026-11-12 | 见 `git log --grep BROKER-DEP-BUMP`、`--grep X-DEP-BUMP` | [原文](#BROKER-DEP-BUMP) |
 | BROKER-AUTH-ADR | 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 | 2026-11-12 | 见 `git log --grep BROKER-AUTH-ADR` | [原文](#BROKER-AUTH-ADR)；[ADR 0004](../adr/0004-鉴权姿态与静态token分叉.md) |
 | BROKER-RETRY-AFTER | 429 `rate_limited` 不带 Retry-After | 2026-11-12 | 见 `git log --grep BROKER-RETRY-AFTER` | [原文](#BROKER-RETRY-AFTER) |
+| X-CI-RACE-STATICCHECK | CI 缺 `-race` 与 `staticcheck` 两道门 | 2026-11-12 | 见 `git log --grep X-CI-RACE` | [施工记录](#X-CI-RACE-STATICCHECK) |
 
 ---
 
@@ -389,3 +390,12 @@
 
 
 
+
+<a id="X-CI-RACE-STATICCHECK"></a>
+### X-CI-RACE-STATICCHECK · CI 补 `-race` 与 `staticcheck`（本仓部分，跨仓伞 `tellurion:X-CI-RACE-STATICCHECK`）
+
+> **施工记录（2026-11-12）**：
+> - **改了什么**：`.github/workflows/ci.yml` 在 `Test` 之后新增 `Test（-race，数据竞争即红）` 与 `Staticcheck` 两步，写法与 analytics / risk / orchestration 腿一致（`go install honnef.co/go/tools/cmd/staticcheck@latest` 后跑 `"$(go env GOPATH)/bin/staticcheck" ./...`）。
+> - **本地验收**：`go run honnef.co/go/tools/cmd/staticcheck@latest ./...` 无输出、EXIT=0。
+> - **未覆盖（如实登记）**：本机 Windows 无 cgo/gcc，`go test -race ./...` 报 `-race requires cgo; enable cgo by setting CGO_ENABLED=1`、EXIT=2 —— **本机未跑 `-race`**，由 CI `ubuntu-latest` 承担；不把未跑写成通过。
+> - **边界**：只动本仓 CI；其余仓由各自伞腿承担。
