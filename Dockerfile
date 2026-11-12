@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # tellurion-broker · 交易网关服务（ADR-036 G0；Mock 健康/版本面；真实 XTP 仍受 X6c 阻塞）
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26.11-alpine AS builder
 
 WORKDIR /src
 RUN apk add --no-cache git
