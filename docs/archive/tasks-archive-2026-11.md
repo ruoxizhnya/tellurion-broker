@@ -15,7 +15,7 @@
 | SVC-BROKER-G2 | 服务就绪门 G2：`broker.order_acks` 唯一 writer · 保留期与部分索引（裁决 ⑨） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G2) |
 | R10 | 幂等映射读失败的哨兵从 `ErrChannelDown` 改为 `ErrIdempotencyStoreUnavailable`（㉒ 已裁「现在修」） | 2026-11-07 | —（原文未记） | [原文](#R10) |
 | SVC-BROKER-G4 | 服务就绪门 G4：网关失败语义 · 装配闸可观测 · runbook（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-BROKER-G4)；[`ADR 0003`](../adr/0003-真钱通道暂不实施与重开条件.md)；[`x6c-xtp-readiness.md`](../x6c-xtp-readiness.md) |
-| BROKER-DEP-BUMP | pgx / x-text 落在已知漏洞版本（govulncheck EXIT=1） | 2026-11-12 | 见 `git log --grep BROKER-DEP-BUMP` | [原文](#BROKER-DEP-BUMP) |
+| BROKER-DEP-BUMP | pgx / x-text 落在已知漏洞版本（govulncheck EXIT=1） | 2026-11-12 | 见 `git log --grep BROKER-DEP-BUMP`、`--grep X-DEP-BUMP` | [原文](#BROKER-DEP-BUMP) |
 | BROKER-AUTH-ADR | 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 | 2026-11-12 | 见 `git log --grep BROKER-AUTH-ADR` | [原文](#BROKER-AUTH-ADR)；[ADR 0004](../adr/0004-鉴权姿态与静态token分叉.md) |
 | BROKER-RETRY-AFTER | 429 `rate_limited` 不带 Retry-After | 2026-11-12 | 见 `git log --grep BROKER-RETRY-AFTER` | [原文](#BROKER-RETRY-AFTER) |
 
@@ -350,6 +350,7 @@
   - **PG 集成腿（2026-11-12 首轮 SKIP → 当日补跑 ✅）**：首轮无 DSN 时 9 条 PG 用例 `SKIP`（`BROKER_TEST_DSN is not set`）+ 3 条纯函数 PASS。当日拿到宿主机口令后，新建**独立临时库** `tellurion_broker_acktest_20261112`（未用活库 `tellurion` / `quant_trading`，未在其中建表），以 `BROKER_TEST_DSN` 指向它跑 `go test ./internal/ackstore -count=1 -v`：**12/12 PASS、0 SKIP**、`EXIT=0`、`ok … 0.830s` —— 9 条 PG 用例（`MigrateIsIdempotent` / `ReserveIsAtomic` / `AckSurvivesAnotherStoreInstance` / `SaveAckRequiresReservation` / `ReservationWithoutAckStaysUnknown` / `CleanupDeletesOnlyAckedRowsPastRetention` / `CleanupBatchCapsAtMaxAndCanContinue` / `MigrateReplayKeepsIndexAndColumnSet` / `ConflictReturnsOriginalFingerprint`）+ 3 条纯函数用例（`SQLStatementsOnlyTouchBrokerSchema` / `CleanupStatementKeepsUnackedRows` / `MigrationsIncludePartialIndex`）。验毕 `DROP DATABASE tellurion_broker_acktest_20261112`（`DROP_EXIT=0`；复查 `datname like 'tellurion_broker_acktest%'` 计数 = 0）。结论：pgx `v5.7.3 → v5.11.0` 在幂等映射（`Reserve` / `SaveAck` / `ON CONFLICT` / 清理批次）上**无行为回归**。
   - **口径订正**：派单文字里的 `TEST_DATABASE_DSN` 在本仓**不存在**；真实门控变量是 `BROKER_TEST_DSN`（`internal/ackstore/pg_test.go:20`）。
   - **工具链范围裁决（2026-11-12 主任确认保留）**：`go` directive 升到 `1.26.11` 超出原单字面范围，但 stdlib 告警只能靠工具链解，**不算放宽验收**；已补 `AGENTS.md` §2 构建前置与 `docs/runbook.md` §11 兼容矩阵（写明 9/12 条告警来自 stdlib）。
+  - **CI 门回补（2026-11-12，跨仓伞 `tellurion:X-DEP-BUMP-CONSUMERS`）**：首轮只把 `govulncheck` 当本地验收跑过一次，**没进 CI 门**——后续任何人把 pgx 降回去都不会被机械拦住，属「pin 升了、门没加」的半完成。本次在 `.github/workflows/ci.yml` 的 `Vet` 之后新增 `Govulncheck` 步（`go run golang.org/x/vuln/cmd/govulncheck@latest ./...`）。回补验收：本仓 `govulncheck ./...` → `No vulnerabilities found.` EXIT=0；破坏验证：`go mod edit -require=github.com/jackc/pgx/v5@v5.7.3 && go mod tidy` ⇒ `GO-2026-5004`、EXIT=1，逐字节还原 `go.mod/go.sum`（SHA256 与降版前一致：`go.mod 29233696…D236`、`go.sum C1247DE3…804F`）后复跑 EXIT=0；`build/vet/test` 全绿（6 包 ok）。
 
 <a id="BROKER-AUTH-ADR"></a>
 ### BROKER-AUTH-ADR · 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 [P2] ✅（2026-11-12）
