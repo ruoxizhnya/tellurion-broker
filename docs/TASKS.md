@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-12
-verified-by: 2026-11-12 `X-CI-RACE-STATICCHECK` 补 CI 的 `-race` 与 `staticcheck` 门（staticcheck 本地 EXIT=0；`-race` 因本机无 cgo 未跑，交由 CI ubuntu 覆盖，已登记）；2026-11-12 `X-DEP-BUMP-CONSUMERS` 回补 `govulncheck` CI 门（BROKER-DEP-BUMP 首轮只跑本地验收、未进门；本次补 CI 步，降 pgx 复红/还原复绿）；2026-11-12 全面审查 W7 三单收口（`BROKER-DEP-BUMP`：pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0，破坏验证降版复红/还原复绿，ackstore PG 集成腿因本机无 `BROKER_TEST_DSN` 未跑并登记重开条件；`BROKER-AUTH-ADR`：新增 ADR-0004 固化鉴权姿态与 kit JWT 分叉例外 + runbook §2.1 轮换 + api-schema 指回，未改代码；`BROKER-RETRY-AFTER`：429 `rate_limited` 补 `Retry-After`（值来自 `rateLimitedRetryAfter` 常量）+ 2 条用例 + 破坏验证，全量 build/vet/test 绿）；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 3 条六字段单，证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；此前 QT-45 / X6c 终态裁决（2026-11-10：主任授权执行侧裁定 ⇒ `QT-45` 收口 ✅（Mock 全绿 + fail-closed 骨架 + 装配闸为终态）、`X6c` 转 ⏸ 挂起（外部依赖 P1~P5，重开条件与流程见 ADR-0003）；B 组债务结论与 C 组验收清单保留）；QT-45 收口复核（2026-11-10：⑤ 三条判据逐条点名用例全绿，③ ① 「两实现」因 XTP 仍是 fail-closed 骨架未完成 ⇒ 🔶 → ⛔，唯一硬前置 = X6c P1~P5；同轮 core R4 退役已确认完成）；SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`、`main:pkg/backtest/execution/port.go` EXIT=0，叠加 G1 HTTP 面已落 ⇒ 两道前置全部解除，状态 ⛔ → ⬜；施工四步逐条列明，未做一步不勾；X6c 仍 ⛔）；G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
+last-verified: 2026-11-13
+verified-by: 2026-11-13 五角审查立单（只立单不施工）——档 3（实现）新立 `BROKER-LIVE-LOOPBACK-GUARD` ⏸（待主任裁决 fail-closed / 维持 Warn）；此前：2026-11-12 `X-CI-RACE-STATICCHECK` 补 CI 的 `-race` 与 `staticcheck` 门（staticcheck 本地 EXIT=0；`-race` 因本机无 cgo 未跑，交由 CI ubuntu 覆盖，已登记）；2026-11-12 `X-DEP-BUMP-CONSUMERS` 回补 `govulncheck` CI 门（BROKER-DEP-BUMP 首轮只跑本地验收、未进门；本次补 CI 步，降 pgx 复红/还原复绿）；2026-11-12 全面审查 W7 三单收口（`BROKER-DEP-BUMP`：pgx v5.11.0 + x/text v0.44.0 + `go` directive 1.26.11，`govulncheck` EXIT=0，破坏验证降版复红/还原复绿，ackstore PG 集成腿因本机无 `BROKER_TEST_DSN` 未跑并登记重开条件；`BROKER-AUTH-ADR`：新增 ADR-0004 固化鉴权姿态与 kit JWT 分叉例外 + runbook §2.1 轮换 + api-schema 指回，未改代码；`BROKER-RETRY-AFTER`：429 `rate_limited` 补 `Retry-After`（值来自 `rateLimitedRetryAfter` 常量）+ 2 条用例 + 破坏验证，全量 build/vet/test 绿）；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 3 条六字段单，证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；此前 QT-45 / X6c 终态裁决（2026-11-10：主任授权执行侧裁定 ⇒ `QT-45` 收口 ✅（Mock 全绿 + fail-closed 骨架 + 装配闸为终态）、`X6c` 转 ⏸ 挂起（外部依赖 P1~P5，重开条件与流程见 ADR-0003）；B 组债务结论与 C 组验收清单保留）；QT-45 收口复核（2026-11-10：⑤ 三条判据逐条点名用例全绿，③ ① 「两实现」因 XTP 仍是 fail-closed 骨架未完成 ⇒ 🔶 → ⛔，唯一硬前置 = X6c P1~P5；同轮 core R4 退役已确认完成）；SVC-BROKER-G3 前置复核（2026-11-10：QT-51 已合入 `a2e388a`、`main:pkg/backtest/execution/port.go` EXIT=0，叠加 G1 HTTP 面已落 ⇒ 两道前置全部解除，状态 ⛔ → ⬜；施工四步逐条列明，未做一步不勾；X6c 仍 ⛔）；G4 ✅（失败语义六类 / 就绪口径 / runbook / 内存演练 + 真 PG 停库→恢复演练与幂等映射核对，2026-11-07 晚补齐）+ G1 ✅（订单/查询/对账 HTTP 面 + 12 码映射 + 键集用例 + 真实二进制 smoke）+ G2 ✅（PG 集成腿真跑 9 条全 PASS）+ R10 施工；此前 G7（施工 ⑤）X6c ⛔ 判定、R2 裁决、R5 申报数量纯函数
 ---
 
 # TASKS — tellurion-broker 未完成项
@@ -35,6 +35,20 @@ verified-by: 2026-11-12 `X-CI-RACE-STATICCHECK` 补 CI 的 `-race` 与 `staticch
 - **⑤ 验收**：换装配实现后 `/version.channel` 随之变化；破坏验证 = 改回常量 ⇒ 用例红。
 - **⑥ 边界**：本仓 server 装配；core 侧消费归 `tellurion`（`CORE-BROKER-RUNTIME-RECHECK`）。
 - **重开条件**：`X6c` 重开时**必须同批完成**（属 X6c 的准入项，不可单独跳过）。
+
+#### 2026-11-13 五角审查 · 档 3（实现）
+
+### BROKER-LIVE-LOOPBACK-GUARD · `BROKER_CHANNEL=live` + 回环地址的告警级别 [P3] ⏸ 待主任裁决
+
+> 档 3（实现）· 来源：02-implementation P3-1 · 顺序 3-10 · 依赖：主任裁决 A/B
+
+- **① 目标**：生产误配（声称 live 却连本机网关）不再只留一行 Warn。
+- **② 上下文**：`pkg/brokerhttp/trader.go:79-84` 在 `BROKER_CHANNEL=live` 且地址为回环时只记 Warn；审查判定为**有意设计**（真实网关可能就部署在本机）。core 侧装配期会核对 `/version.channel`，但不会拦截回环地址。
+- **③ 要求**：建议 **B fail-closed**：默认拒绝 `live + loopback`，除非显式设置 `BROKER_ALLOW_LOOPBACK_LIVE=true`；备选 **A 维持 Warn**：保留现状，但在 ADR/runbook 写明并增加可观测指标（启动事件/配置快照）。建议 B——生产误配的代价高于本地联调便利，显式放行足以覆盖联调。
+- **④ 约束与非目标**：不改通道实现与下单语义；不把 mock 通道纳入该闸；不新增配置前缀体系。
+- **⑤ 验收**：B——`live + loopback` 无放行 ⇒ 启动失败并点名配置项；有放行 ⇒ 启动成功且 Warn 保留；破坏验证 = 改回只 Warn ⇒ 用例红。A——runbook 有关键词、启动指标可查。
+- **⑥ 边界**：broker 启动校验 + runbook/ADR。
+- **重开条件**：主任裁决 A 或 B（建议 B）。
 
 ## 二、跨仓指针（不在本仓，勿双写）
 
