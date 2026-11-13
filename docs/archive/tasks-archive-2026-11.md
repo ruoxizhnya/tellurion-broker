@@ -19,6 +19,7 @@
 | BROKER-AUTH-ADR | 写侧静态 token / 读侧开放的鉴权姿态无 ADR，与兄弟仓 kit JWT 分叉 | 2026-11-12 | 见 `git log --grep BROKER-AUTH-ADR` | [原文](#BROKER-AUTH-ADR)；[ADR 0004](../adr/0004-鉴权姿态与静态token分叉.md) |
 | BROKER-RETRY-AFTER | 429 `rate_limited` 不带 Retry-After | 2026-11-12 | 见 `git log --grep BROKER-RETRY-AFTER` | [原文](#BROKER-RETRY-AFTER) |
 | X-CI-RACE-STATICCHECK | CI 缺 `-race` 与 `staticcheck` 两道门 | 2026-11-12 | 见 `git log --grep X-CI-RACE` | [施工记录](#X-CI-RACE-STATICCHECK) |
+| BROKER-CI-GATES | CI 起 PG 16 + 覆盖率门（库侧 9 条 SKIP→PASS；实测 78.0% → 门 73%） | 2026-11-13 | 见本条 | [原文与施工记录](#BROKER-CI-GATES) |
 
 ---
 
@@ -399,3 +400,27 @@
 > - **本地验收**：`go run honnef.co/go/tools/cmd/staticcheck@latest ./...` 无输出、EXIT=0。
 > - **未覆盖（如实登记）**：本机 Windows 无 cgo/gcc，`go test -race ./...` 报 `-race requires cgo; enable cgo by setting CGO_ENABLED=1`、EXIT=2 —— **本机未跑 `-race`**，由 CI `ubuntu-latest` 承担；不把未跑写成通过。
 > - **边界**：只动本仓 CI；其余仓由各自伞腿承担。
+
+---
+
+## 2026-11-13 收口
+
+<a id="BROKER-CI-GATES"></a>
+### BROKER-CI-GATES · CI 起 PG 并设覆盖率门（1 条 DB 用例不再 skip）[P2] ✅ 2026-11-13
+
+> 档 4（测试）· 来源：03-testing P1-3 / P2-2 · 顺序 4-8 · 依赖：core 伞 `X-COVERAGE-FLOOR`
+
+- **① 目标**：CI 真跑 DB 腿（1 条按设计 skip 的用例），并补覆盖率门。
+- **② 上下文**：Test job 无 postgres service / 无 DSN，库侧用例长期 skip；本仓迁移入口与 DSN 变量名需施工时以测试代码为准确认。
+- **③ 要求**：① 加 `postgres:16` service + healthcheck；② 注入 DSN；③ Test 前应用本仓迁移；④ 本地无 DSN 仍 skip；⑤ 覆盖率门 = 实测 - 5。
+- **④ 约束与非目标**：不改业务代码；不把 skip 改成假通过；不顺手改通道实现。
+- **⑤ 验收**：CI 中 DB 用例 PASS（数量 > 0）；删测试 ⇒ 门红；本地无 DSN ⇒ skip 且原因可读。
+- **⑥ 边界**：本仓 CI + 测试夹具。
+
+**施工记录（2026-11-13）**：
+- **DSN / 迁移口径（实测取得）**：库侧用例统一读 `BROKER_TEST_DSN`；迁移合法入口 = `internal/ackstore.Migrate`（`ddl.go` 是 `broker` schema 唯一建表真相，幂等只前滚），服务启动（`cmd/brokergateway` 的 `connectAndMigrate`）与真库用例走同一函数，真库用例在 `testPool` 内即调 `Migrate`。CI 迁移步复用现成的幂等用例 `TestPgStore_MigrateIsIdempotent`，不手写 SQL、不复制 core 脚本。
+- **CI 改动**：`.github/workflows/ci.yml` 的 Test job 起 `postgres:16` service（`pg_isready`，5s/5s/10 次）+ job 级注入 `BROKER_TEST_DSN`（CI 内临时库 `tellurion_broker_test`，**绝不指向部署库**）；新增 `Migrate（ackstore.Migrate）` 步；`Test` 步改 `go test ./... -count=1 -coverprofile=coverage.out`；新增 `Coverage gate` 步（`go tool cover -func` 最后一行取 total，解析不到也 `exit 1`，低于 73 即红）；`-race` / `staticcheck` / `govulncheck` 步不变。
+- **实测（隔离 PG 16 容器 55432 / 库 `tellurion_broker_test`，未碰部署库 `tellurion`）**：带 DSN `74 PASS / 0 SKIP`、覆盖率 `total: 78.0%`（768 条语句）；无 DSN `65 PASS / 9 SKIP`（9 条 `TestPgStore_*` 真库用例）、`73.4%`。单内标题的「1 条」是旧口径，**实测库侧 9 条**由 SKIP 转 PASS，已按实测改正（不改测试凑数）。门 = 78 取整 - 5 = **73%**。
+- **破坏 / 负向验证（真做真还原）**：① 删 `internal/gateway/mock_test.go` ⇒ total **41.3% < 73% 门红**（本仓测试面小，单文件即可真红），`Copy-Item` 逐字节还原后 `git status` 该文件为空、复绿；② 删到破坏编译的用例 ⇒ 测试步 `EXIT=1`（同兄弟仓口径，未在本仓另造）；③ **如实登记**：漏配 DSN 时实测 `73.4%`，**高于 73% 门**（DB 腿只贡献 4.6 点）——本仓的「漏配 DSN」这一项**不**触发红，门的定位是防累计漂移 + 抓大块测试丢失。
+- **文档**：`AGENTS.md` §2 补 CI 链（迁移步 + 覆盖率门）与两条 bullet（DB 腿 9 条 SKIP→PASS；门 73% 的来源、边界与破坏验证）；`docs/TASKS.md` 六字段块改为收口指针、frontmatter 记 `completed-2026-11-13`。
+- **门禁**：`gofmt -l .` 无输出；`go build ./...` / `go vet ./...` / `go test ./... -count=1`（无 DSN，库侧按设计 skip）全绿；`python -c "import yaml;yaml.safe_load(open('.github/workflows/ci.yml'))"` 解析通过。

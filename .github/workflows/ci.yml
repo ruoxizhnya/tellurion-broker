@@ -12,6 +12,23 @@ jobs:
   go:
     name: Build & Test
     runs-on: ubuntu-latest
+    # BROKER-CI-GATES：库侧用例不再长期 skip——起真 PG，Test 全腿带 DSN 跑。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tellurion_broker_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      BROKER_TEST_DSN: postgres://postgres:postgres@127.0.0.1:5432/tellurion_broker_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -42,8 +59,27 @@ jobs:
       - name: Govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+      # BROKER-CI-GATES：Test 前应用本仓迁移。合法入口只有 internal/ackstore 的
+      # Migrate（ddl.go 是 broker schema 唯一建表真相，幂等只前滚）；服务启动
+      # （cmd/brokergateway 的 connectAndMigrate）与真库用例走同一函数。
+      # 这里复用现成的迁移幂等用例，不手写 SQL、不复制 core 脚本。
+      - name: Migrate（ackstore.Migrate）
+        run: go test ./internal/ackstore -run '^TestPgStore_MigrateIsIdempotent$' -count=1 -v
+
       - name: Test
-        run: go test ./... -count=1
+        run: go test ./... -count=1 -coverprofile=coverage.out
+
+      # BROKER-CI-GATES：覆盖率门。阈值来源见 AGENTS.md §2：2026-11-13 隔离
+      # PG 16 真跑全套件实测 78.0%，取整 78 − 5 = 73。
+      - name: Coverage gate
+        run: |
+          total="$(go tool cover -func=coverage.out | tail -n 1 | awk '{print $3}' | tr -d '%')"
+          echo "total coverage: ${total}% (floor: 73%)"
+          if [ -z "$total" ]; then
+            echo "coverage total not parsed from coverage.out"
+            exit 1
+          fi
+          awk -v total="$total" 'BEGIN { if (total + 0 < 73) { printf "coverage %.1f%% is below the 73%% floor\n", total; exit 1 } }'
 
       - name: Test（-race，数据竞争即红）
         run: go test -race ./... -count=1

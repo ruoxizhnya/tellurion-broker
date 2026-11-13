@@ -26,7 +26,9 @@ go test ./...
 - 可选集成测试（无外部条件时自动 skip）：`BROKER_TEST_DSN='postgres://postgres@127.0.0.1:5432/tellurion_broker_test?sslmode=disable' go test ./internal/ackstore -count=1`（测 `broker.order_acks` 的原子占位 / 跨实例回读）。
 - 若某一步需要别的仓的源码目录才过，那是**边界画错了**——停下来修边界，**不要**加 `replace ../xxx` 绕过。
 - 本机同时改多个仓时可用 `go.work` 联调，但**它不入库**（`.gitignore` 已挡）。
-- CI（`.github/workflows/ci.yml`，单 job `go`）：`gofmt -l .` → `go build ./...` → `go vet ./...` → `govulncheck@latest ./...`（依赖漏洞门，X-DEP-BUMP-CONSUMERS）→ `go test ./... -count=1` → `go test -race ./... -count=1`（竞态门，X-CI-RACE-STATICCHECK）→ `staticcheck@latest ./...`（`go install` 后跑，未钉版本）。
+- CI（`.github/workflows/ci.yml`，单 job `go`）：`gofmt -l .` → `go build ./...` → `go vet ./...` → `govulncheck@latest ./...`（依赖漏洞门，X-DEP-BUMP-CONSUMERS）→ **Migrate（`ackstore.Migrate`，即 `TestPgStore_MigrateIsIdempotent`）** → `go test ./... -count=1 -coverprofile=coverage.out` + **覆盖率门**（BROKER-CI-GATES）→ `go test -race ./... -count=1`（竞态门，X-CI-RACE-STATICCHECK）→ `staticcheck@latest ./...`（`go install` 后跑，未钉版本）。
+- **CI 的 DB 腿（BROKER-CI-GATES，2026-11-13）**：Test job 起 `postgres:16` service（`pg_isready`）+ job 级注入 `BROKER_TEST_DSN`（CI 内临时库 `tellurion_broker_test`，**绝不指向部署库**）。Test 前先跑 `go test ./internal/ackstore -run '^TestPgStore_MigrateIsIdempotent$' -count=1 -v` 应用迁移——入口就是服务启动同款 `ackstore.Migrate`（`ddl.go` 是 `broker` schema 唯一建表真相，幂等只前滚），不另造 `.sql` 镜像、不复制 core 脚本。效果：库侧 **9 条**用例由 SKIP 转 PASS（带 DSN 74 PASS / 0 SKIP，无 DSN 65 PASS / 9 SKIP）；**本地不设 DSN 仍按设计 skip**。
+- **覆盖率门（BROKER-CI-GATES）**：阈值 **73%**（语句加权，`go tool cover -func` 的 total），来源 = 2026-11-13 在隔离 PG 16 上真跑全套件实测 **78.0%**（768 条语句），取整 78 减 5（跨仓口径见 `tellurion:docs/TASKS.md` → `X-COVERAGE-FLOOR`）。低于阈值 `exit 1`。本仓测试面小，**删单个可编译测试文件即可真红**：删 `internal/gateway/mock_test.go` ⇒ 41.3%（门红），删到破坏编译的用例则测试步 `EXIT=1`。如实登记边界：无 DSN 时实测 **73.4% > 73%**（DB 腿只贡献 4.6 点），漏配 DSN 这一项本仓**不**触发红，门的定位是防累计漂移 + 抓大块测试丢失。
 
 ## 3. 边界（硬约束）
 
