@@ -20,6 +20,7 @@
 | BROKER-RETRY-AFTER | 429 `rate_limited` 不带 Retry-After | 2026-11-12 | 见 `git log --grep BROKER-RETRY-AFTER` | [原文](#BROKER-RETRY-AFTER) |
 | X-CI-RACE-STATICCHECK | CI 缺 `-race` 与 `staticcheck` 两道门 | 2026-11-12 | 见 `git log --grep X-CI-RACE` | [施工记录](#X-CI-RACE-STATICCHECK) |
 | BROKER-CI-GATES | CI 起 PG 16 + 覆盖率门（库侧 9 条 SKIP→PASS；实测 78.0% → 门 73%） | 2026-11-13 | 见本条 | [原文与施工记录](#BROKER-CI-GATES) |
+| BROKER-LIVE-LOOPBACK-GUARD | `BROKER_CHANNEL=live` + 回环地址的告警级别（裁决 A：维持 Warn + 成文；**实现不在本仓**） | 2026-11-13 | 无（本仓无代码动作） | [原文、位置订正与裁决](#BROKER-LIVE-LOOPBACK-GUARD)；`tellurion-docs:docs/archive/odr/odr-074-rulings-on-nine-suspended-tasks.md` D5 |
 
 ---
 
@@ -424,3 +425,31 @@
 - **破坏 / 负向验证（真做真还原）**：① 删 `internal/gateway/mock_test.go` ⇒ total **41.3% < 73% 门红**（本仓测试面小，单文件即可真红），`Copy-Item` 逐字节还原后 `git status` 该文件为空、复绿；② 删到破坏编译的用例 ⇒ 测试步 `EXIT=1`（同兄弟仓口径，未在本仓另造）；③ **如实登记**：漏配 DSN 时实测 `73.4%`，**高于 73% 门**（DB 腿只贡献 4.6 点）——本仓的「漏配 DSN」这一项**不**触发红，门的定位是防累计漂移 + 抓大块测试丢失。
 - **文档**：`AGENTS.md` §2 补 CI 链（迁移步 + 覆盖率门）与两条 bullet（DB 腿 9 条 SKIP→PASS；门 73% 的来源、边界与破坏验证）；`docs/TASKS.md` 六字段块改为收口指针、frontmatter 记 `completed-2026-11-13`。
 - **门禁**：`gofmt -l .` 无输出；`go build ./...` / `go vet ./...` / `go test ./... -count=1`（无 DSN，库侧按设计 skip）全绿；`python -c "import yaml;yaml.safe_load(open('.github/workflows/ci.yml'))"` 解析通过。
+
+---
+
+## 2026-11-13 裁决结案（非施工）
+
+<a id="BROKER-LIVE-LOOPBACK-GUARD"></a>
+### BROKER-LIVE-LOOPBACK-GUARD · `BROKER_CHANNEL=live` + 回环地址的告警级别 [P3] ✅ 2026-11-13 结案（实现不在本仓）
+
+> 档 3（实现）· 来源：02-implementation P3-1 · 顺序 3-10 · 依赖：主任裁决 A/B
+
+**原文（逐字保留）**：
+
+- **① 目标**：生产误配（声称 live 却连本机网关）不再只留一行 Warn。
+- **② 上下文**：`pkg/brokerhttp/trader.go:79-84` 在 `BROKER_CHANNEL=live` 且地址为回环时只记 Warn；审查判定为**有意设计**（真实网关可能就部署在本机）。core 侧装配期会核对 `/version.channel`，但不会拦截回环地址。
+- **③ 要求**：建议 **B fail-closed**：默认拒绝 `live + loopback`，除非显式设置 `BROKER_ALLOW_LOOPBACK_LIVE=true`；备选 **A 维持 Warn**：保留现状，但在 ADR/runbook 写明并增加可观测指标（启动事件/配置快照）。建议 B——生产误配的代价高于本地联调便利，显式放行足以覆盖联调。
+- **④ 约束与非目标**：不改通道实现与下单语义；不把 mock 通道纳入该闸；不新增配置前缀体系。
+- **⑤ 验收**：B——`live + loopback` 无放行 ⇒ 启动失败并点名配置项；有放行 ⇒ 启动成功且 Warn 保留；破坏验证 = 改回只 Warn ⇒ 用例红。A——runbook 有关键词、启动指标可查。
+- **⑥ 边界**：broker 启动校验 + runbook/ADR。
+- **重开条件**：主任裁决 A 或 B（建议 B）。
+
+**位置订正（2026-11-13 实测）**：原 ② / ⑥ 把落点写在本仓是错的。回环判定与 live 分支在 **`tellurion:pkg/brokerhttp/trader.go:78-99`**（`resolveChannel` 的 live 分支 `:78-85` + `isLoopbackHost` `:93-100`），属 core 的 broker 客户端；本仓 `grep` 无 `loopback` / `127.0.0.1` 实现，只有 `cmd/brokergateway/main.go:98-101` 一条关于 `/version.channel` 的注释。**本仓无可施工面，故结案为指针**（见 `docs/TASKS.md` §二 跨仓指针），不保留 ⏸ 假挂起。
+
+**裁决（主任 2026-11-13，ODR-074 D5）**：**A —— 维持 Warn 并成文，不改 fail-closed**。理由：真钱通道未开；实质风险（误把 mock 当 live）已由 `/version.channel` 对拍拒绝启动覆盖；项目形态是单人自托管，真实网关部署在同机合法；原单 ④ 明确「不新增配置前缀体系」，而 B 方案的新放行键正是该约束要避免的扩张。
+
+**动作与归属**：
+- `tellurion`（core 施工会话）：`docs/live-trading.md` 或 runbook 补「live + loopback 的判定与处置」一节；启动 Warn 可补 `reason=loopback_gateway` 结构化字段（可选，1 行）；core 台账按裁决收口。
+- `tellurion-broker`（本仓）：无代码动作；活跃台账改指针，本条移入归档（本次）。
+- 证据：`tellurion-docs:docs/archive/odr/odr-074-rulings-on-nine-suspended-tasks.md` D5；决策材料 `tellurion-docs:docs/reviews/2026-11-13/decision-materials-suspended-9-2026-11-13.md` §5。
